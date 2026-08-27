@@ -176,6 +176,58 @@ is the usual failure mode there.
 Host capability confirmed before provisioning: 8 processor cores, 15674 MB RAM,
 81.7 GB free on C:.
 
+### Addendum 3 — 2026-08-27, source control and collaboration setup
+
+Prompted by an imminent laptop switch and additional contributors joining.
+
+**Pre-flight inspection (before any destructive action, per the request):**
+the project was **not a git repository at all** — no `.git` directory, no parent
+repository above it, zero commits. Nothing had ever been committed, so no history
+audit or rewrite was needed. `venv/` (34 MB) and `demo-environment/.vagrant/` were
+present in the working tree but had never been tracked.
+
+**`.gitignore`** — rewritten to cover secrets (`.env`, `*.key`, `*.pem`, with a
+`!.env.example` negation), Python artefacts, Node/Next.js artefacts, Vagrant state,
+OS/editor noise, and collected audit evidence. Verified *behaviourally* rather than by
+reading it: `git add --dry-run` confirms `.env.example` is trackable and a real `.env`
+is refused, and `git check-ignore` confirms `venv/`, `.vagrant/`, `node_modules/` and
+`phase1_raw_output.json` are all excluded.
+
+Collected evidence (`phase1_raw_output.json`, `*_raw_output.json`, `evidence/`) is
+ignored by rule, not case-by-case. For the throwaway demo VM the contents are
+harmless, but the same file generated against a real server is a detailed map of that
+host's weaknesses, and the habit is what matters.
+
+**`.gitattributes`** — added, and this one is a correctness fix rather than tidiness.
+Without `eol=lf`, git checks `demo-environment/provision.sh` out with CRLF endings on
+a Windows clone, and Vagrant's shell provisioner then fails inside the VM with
+`$'\r': command not found`. With contributors on mixed platforms this would have
+surfaced as an unreproducible "the demo VM just doesn't provision on my machine".
+
+**`README.md`** — clone-to-running instructions, commands only. Install commands are
+the exact ones recorded in Addendum 2. macOS/Linux equivalents are included but
+labelled unverified, since only the Windows path has actually been exercised here.
+
+**`.env.example`** — added per spec Section 6 (`SECRETS_KEY` placeholder plus
+`DATABASE_URL`). Slightly ahead of `secrets_manager.py`, which does not exist yet, but
+it is spec-mandated and contributors need it at clone time.
+
+**Commit and push.** Repo initialised, default branch renamed `master` → `main`,
+identity set **repo-locally** (not globally, to avoid changing the machine's git
+config for unrelated projects). Initial commit `f549b4f`, 38 files. `CLAUDE.md` is
+committed at the repository root and confirmed present on the remote branch. Pushed
+to `https://github.com/Aravind2674/Automated-Audit-Tool.git`; the remote was verified
+empty beforehand, so nothing was overwritten.
+
+The commit message states explicitly that Phase 1 Criterion 2 is **not** yet verified,
+so the repository history does not imply a completeness the build has not reached.
+
+**⚠️ Spec discrepancy — `CLAUDE.md` has no Section 11.** This work was requested "per
+Section 11's list". `CLAUDE.md` is unchanged at 395 lines, sha256 `2bae871d4337…`,
+and its section headings stop at `## 10. Missing tool policy`. The `.gitignore`
+contents above are therefore **my own judgement, not a spec list**, and should be
+reviewed against the intended Section 11 once it exists.
+
 ### Open items carried into Phase 2
 
 - **`manual_review` fixture exists but is not yet exercised.** The fixture is in
