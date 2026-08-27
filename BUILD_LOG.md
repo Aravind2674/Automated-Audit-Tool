@@ -1706,6 +1706,68 @@ three passed. Worth knowing for the demo: **the launcher starts the application 
 not the demo VM**, so live scans fail until `vagrant up` has been run. Either add it to
 the launcher or run it first — see the open items.
 
+#### Launcher addendum — demo VM resume
+
+`start_audit_tool.bat` gained a third step: verify the demo VM's state and resume it
+if it is suspended, in the same shape as the PostgreSQL check. This removes a failure
+mode that had already bitten once — VirtualBox leaves the VM `saved` after the host
+sleeps, and live scans then fail for a reason nothing on screen explains.
+
+State is read from `vagrant status --machine-readable` rather than the human output,
+which is localised and reflows between Vagrant versions. `running` passes through;
+`saved`/`poweroff`/`aborted` are resumed with `vagrant up`; `not_created` prints
+instructions and continues, because creating the VM downloads a ~600 MB box and can
+take 10-40 minutes — far too long for a launcher to do silently.
+
+Every failure path **warns and continues** rather than aborting: the dashboard, the
+historical data and the PDF export all work without the VM. Only live scans need it,
+so blocking the whole demo on a missing VM would make the tool less useful, not more.
+
+**A control-flow bug was introduced and caught while doing this.** The ports check
+ended in `goto :launch`, which jumped straight over the newly inserted VM block — so
+the check would have been dead code on the normal path, while still looking correct in
+review. Routed through `:vmcheck` instead. Found by tracing every `goto`/label in the
+file rather than by reading the diff.
+
+Verified from a clean baseline with the VM **deliberately suspended**:
+
+```
+vagrant suspend            -> state: saved
+stop_audit_tool.bat        -> ports free, no processes
+
+start_audit_tool.bat
+ [1/5] PostgreSQL service (postgresql-x64-17)... already running.
+ [2/5] Checking ports 8000 and 3000...          both free.
+ [3/5] Demo VM (Vagrant)...
+       state is "saved" - resuming (this can take 30-60 seconds)...
+       resumed.
+ [4/5] Starting backend and frontend...
+ [5/5] API ready on port 8000. Dashboard ready on port 3000.
+```
+
+Then — the part that actually matters, rather than the VM merely reporting `running` —
+a **live scan over real SSH**:
+
+```
+POST /api/scans {"mode":"live"}  -> 202 in 0.51s
+  t+3s   running    results=0   credential_used=0
+  t+9s   running    results=0   credential_used=1
+  t+12s  completed  results=18  credential_used=1
+
+evidence read live from the VM at 2026-08-28 01:35:02:
+  CIS-5.2.10  fail  PermitRootLogin      = yes
+  CIS-1.4.2   fail  /etc/shadow.mode     = 644
+  CIS-3.2.1   fail  net.ipv4.ip_forward  = 1
+```
+
+The `credential_used` row proves a real SSH session through `secrets_manager`, and the
+evidence values are the demo VM's actual misconfigurations — not cached data.
+
+**Known gap, deliberate:** the "already running" fast path exits before the VM check,
+so a tool left running while its VM is separately suspended will not self-heal. That
+path exists to open the browser instantly; making it wait 30-60s would defeat it. Run
+`stop_audit_tool.bat` then start again.
+
 ### Addendum — 2026-08-27, Phase 7 reconciled against the written spec
 
 Phase 7 was built from the project owner's chat paraphrase, because the updated

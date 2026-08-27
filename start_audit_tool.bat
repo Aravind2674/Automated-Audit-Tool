@@ -9,8 +9,9 @@ REM
 REM  1. Ensure PostgreSQL's Windows service is running.
 REM  2. Refuse to start if the ports are already taken -- if it is OUR tool
 REM     already running, just open the browser instead of spawning duplicates.
-REM  3. Start backend + frontend as separate background windows.
-REM  4. POLL until both actually answer, then open the browser.
+REM  3. Ensure the demo VM is running (resume it if suspended).
+REM  4. Start backend + frontend as separate background windows.
+REM  5. POLL until both actually answer, then open the browser.
 REM
 REM  Nothing here sleeps a fixed number of seconds and hopes: every wait polls
 REM  for a real response and gives up with a readable message on a cap.
@@ -63,7 +64,7 @@ if errorlevel 1 (
 REM ===========================================================================
 REM  1. PostgreSQL service
 REM ===========================================================================
-echo  [1/4] PostgreSQL service ^(%PG_SERVICE%^)...
+echo  [1/5] PostgreSQL service ^(%PG_SERVICE%^)...
 sc query "%PG_SERVICE%" 2>nul | find "RUNNING" >nul
 if not errorlevel 1 (
     echo        already running.
@@ -101,7 +102,7 @@ echo        started.
 REM ===========================================================================
 REM  2. Ports - do not spawn duplicates
 REM ===========================================================================
-echo  [2/4] Checking ports %API_PORT% and %WEB_PORT%...
+echo  [2/5] Checking ports %API_PORT% and %WEB_PORT%...
 
 set "API_BUSY="
 set "WEB_BUSY="
@@ -110,7 +111,7 @@ for /f "tokens=5" %%P in ('netstat -ano ^| findstr /R /C:":%WEB_PORT% .*LISTENIN
 
 if not defined API_BUSY if not defined WEB_BUSY (
     echo        both free.
-    goto :launch
+    goto :vmcheck
 )
 
 REM  Something is listening. Is it US, or an unrelated program?
@@ -142,7 +143,86 @@ pause
 exit /b 1
 
 REM ===========================================================================
-REM  3. Launch
+REM  3. Demo VM (Vagrant) - needed for LIVE scans
+REM
+REM  NOTE: the "already running" fast path above exits BEFORE reaching here, on
+REM  purpose. That path exists to open the browser instantly for a tool that is
+REM  already up; making it wait 30-60s to resume a VM would defeat it. The
+REM  trade-off is that a tool left running while its VM is separately suspended
+REM  will not self-heal -- run stop_audit_tool.bat then start again.
+REM ===========================================================================
+:vmcheck
+echo  [3/5] Demo VM ^(Vagrant^)...
+
+where vagrant >nul 2>&1
+if errorlevel 1 (
+    echo.
+    echo        WARNING: vagrant is not on PATH. The dashboard will still work
+    echo        with existing data, but "Run New Scan" in live mode will fail.
+    echo        FIX: install Vagrant, or run scans with mode="cached".
+    echo.
+    goto :vm_done
+)
+
+REM  --machine-readable is parsed rather than the human text, because the
+REM  pretty output is localised and reflowed between Vagrant versions.
+REM  Line shape:  <timestamp>,<machine>,state,<value>
+set "VMSTATE="
+pushd "%~dp0demo-environment"
+for /f "tokens=3,4 delims=," %%a in ('vagrant status --machine-readable 2^>nul ^| findstr ",state,"') do set "VMSTATE=%%b"
+
+if /i "%VMSTATE%"=="running" (
+    echo        already running.
+    popd
+    goto :vm_done
+)
+
+if /i "%VMSTATE%"=="not_created" (
+    echo.
+    echo        WARNING: the demo VM has never been created on this machine.
+    echo        Creating it downloads a ~600 MB box and can take 10-40 minutes,
+    echo        which is too long to do silently from a launcher.
+    echo        FIX: run this once, then re-run the launcher:
+    echo               cd demo-environment ^&^& vagrant up
+    echo        Continuing without it - the dashboard works on existing data,
+    echo        but live scans will fail.
+    echo.
+    popd
+    goto :vm_done
+)
+
+if "%VMSTATE%"=="" (
+    echo.
+    echo        WARNING: could not determine the VM state ^(is VirtualBox installed?^).
+    echo        FIX: cd demo-environment ^&^& vagrant status
+    echo        Continuing without it - live scans will fail.
+    echo.
+    popd
+    goto :vm_done
+)
+
+REM  saved / poweroff / aborted -- all resumable with `vagrant up`.
+echo        state is "%VMSTATE%" - resuming ^(this can take 30-60 seconds^)...
+vagrant up >nul 2>&1
+
+set "VMSTATE="
+for /f "tokens=3,4 delims=," %%a in ('vagrant status --machine-readable 2^>nul ^| findstr ",state,"') do set "VMSTATE=%%b"
+popd
+
+if /i "%VMSTATE%"=="running" (
+    echo        resumed.
+) else (
+    echo.
+    echo        WARNING: the VM did not reach "running" ^(now: "%VMSTATE%"^).
+    echo        FIX: cd demo-environment ^&^& vagrant up   and read the output.
+    echo        Continuing without it - the dashboard works on existing data,
+    echo        but live scans will fail.
+    echo.
+)
+:vm_done
+
+REM ===========================================================================
+REM  4. Launch
 REM ===========================================================================
 :launch
 
@@ -154,13 +234,13 @@ REM  leaves .next populated but with no BUILD_ID, and `next start` then dies
 REM  with "Could not find a production build" -- which is exactly how this was
 REM  found. A fresh clone has no .next at all and hits the same path.
 if not exist "%~dp0frontend\node_modules" (
-    echo  [3/4] Installing frontend dependencies ^(first run only, ~1 min^)...
+    echo  [4/5] Installing frontend dependencies ^(first run only, ~1 min^)...
     pushd "%~dp0frontend"
     call npm install --no-audit --no-fund
     popd
 )
 if not exist "%~dp0frontend\.next\BUILD_ID" (
-    echo  [3/4] Building the dashboard ^(first run only, ~1 min^)...
+    echo  [4/5] Building the dashboard ^(first run only, ~1 min^)...
     pushd "%~dp0frontend"
     call npm run build
     popd
@@ -174,7 +254,7 @@ if not exist "%~dp0frontend\.next\BUILD_ID" (
     )
 )
 
-echo  [3/4] Starting backend and frontend...
+echo  [4/5] Starting backend and frontend...
 
 REM  NOTE ON QUOTING -- this is fragile and was got wrong once, so it is spelled
 REM  out. The repo path contains a space ("Audit Tool"), and the obvious form
@@ -190,9 +270,9 @@ start "Audit Tool - API" /D "%~dp0" /min cmd /c venv\Scripts\python.exe -m uvico
 start "Audit Tool - Web" /D "%~dp0frontend" /min cmd /c npm run start -- --port %WEB_PORT%
 
 REM ===========================================================================
-REM  4. Poll until both actually answer, then open the browser
+REM  5. Poll until both actually answer, then open the browser
 REM ===========================================================================
-echo  [4/4] Waiting for services to come up...
+echo  [5/5] Waiting for services to come up...
 
 set /a TRIES=0
 :wait_api

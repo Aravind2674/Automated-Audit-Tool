@@ -339,9 +339,14 @@ start_audit_tool.bat
 ```
 
 It checks the PostgreSQL service, refuses to start a second copy if the tool is
-already running, builds the frontend if there is no production build yet, starts both
-services, **polls until each actually answers**, then opens your browser at
-http://localhost:3000.
+already running, **resumes the demo VM if it is suspended**, builds the frontend if
+there is no production build yet, starts both services, **polls until each actually
+answers**, then opens your browser at http://localhost:3000.
+
+The VM step matters because VirtualBox leaves the demo VM in a `saved` state after the
+host sleeps, and live scans then fail with no obvious cause. If the VM has never been
+created, the launcher says so and continues rather than silently spending 10-40 minutes
+downloading a box — run `cd demo-environment && vagrant up` once first.
 
 To shut down:
 
