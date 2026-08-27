@@ -17,6 +17,7 @@ import datetime
 import json
 import pathlib
 import sys
+import time
 import uuid
 
 sys.path.insert(0, str(pathlib.Path(__file__).parent))
@@ -167,6 +168,143 @@ def execute_scan(mode: str = "cached", triggered_by: str = "api",
             "outcomes": counts,
             "compliance_pct": round(100.0 * counts.get("pass", 0) / scored, 1)
             if scored else None,
+        }
+    except Exception:
+        session.rollback()
+        run = session.get(Run, run_id)
+        if run is not None:
+            run.status = "failed"
+            run.completed_at = _now()
+            session.commit()
+        raise
+    finally:
+        session.close()
+
+
+def execute_multi_target_scan(
+    targets: list[dict],
+    triggered_by: str = "api",
+    collector_type: str = "ssh",
+    aws_raw_docs: list[dict] | None = None,
+    progress=None,
+) -> dict:
+    """Scan N targets in ONE run, writing one `runs` row and results for every target.
+
+    Added for Phase 8 (spec Section 7a): the NFR requires handling at least 50
+    simulated hosts/resources without redesign. Everything before this scanned exactly
+    one target, so the multi-target path is genuinely new -- but note what did NOT have
+    to change: the normalizer, the evaluator, the control schema, the persistence layer
+    and the dashboard queries are all untouched. `applies_to` already fans controls
+    across whatever resources it is given, which is why 50 targets needed an
+    orchestration loop rather than a redesign.
+
+    Collection is SEQUENTIAL and synchronous. That is deliberate for the measurement:
+    the point of Phase 8 is to find out whether synchronous execution is a real problem
+    at 50 targets or only a theoretical one, and parallelising it before measuring
+    would destroy the evidence needed to answer that.
+
+    `progress` is an optional callable(index, total, target_id) for long runs.
+    """
+    from audit import AuditSink
+    from db import create_schema, get_engine, get_sessionmaker
+    from models.schema import Result, Run
+
+    controls = load_controls()
+    run_id = uuid.uuid4()
+    correlation_id = uuid.uuid4()
+    started_at = _now()
+
+    engine = get_engine()
+    create_schema(engine)
+    session = get_sessionmaker(engine)()
+
+    timings: dict[str, float] = {}
+    t0 = time.perf_counter()
+
+    try:
+        sink = AuditSink(session, correlation_id, run_id, actor=triggered_by)
+        persist_controls(session, controls)
+        session.add(Run(
+            run_id=run_id, correlation_id=correlation_id, triggered_by=triggered_by,
+            started_at=started_at, completed_at=None, status="running",
+        ))
+        session.commit()
+        sink.event("scan_started", "ok",
+                   {"targets": len(targets), "controls": len(controls),
+                    "collector_type": collector_type})
+        session.commit()
+
+        # ---- collect ------------------------------------------------------
+        collect_start = time.perf_counter()
+        all_resources: list[dict] = []
+
+        if collector_type == "aws":
+            # moto-backed; the caller supplies already-collected raw docs so the mock
+            # context stays under its control.
+            all_resources = normalize(aws_raw_docs or [], "aws")
+        else:
+            linux_controls = [c for c in controls if "linux_server" in c["applies_to"]]
+            sources = required_sources(linux_controls)
+            for i, target in enumerate(targets, 1):
+                if progress:
+                    progress(i, len(targets), target["target_id"])
+                t = dict(target)
+                t["sources"] = sources
+                collector = SSHCollector(
+                    db_session=session, actor=triggered_by,
+                    correlation_id=correlation_id, run_id=run_id,
+                )
+                raw_docs = collector.collect(t)
+                session.commit()  # credential_used rows
+                all_resources.extend(normalize(raw_docs, "ssh"))
+
+        timings["collect_s"] = round(time.perf_counter() - collect_start, 2)
+
+        # ---- evaluate -----------------------------------------------------
+        eval_start = time.perf_counter()
+        all_results: list[dict] = []
+        for control in controls:
+            all_results.extend(evaluate(
+                control, all_resources, audit_sink=sink,
+                correlation_id=str(correlation_id), run_id=str(run_id),
+                actor=triggered_by,
+            ))
+        timings["evaluate_s"] = round(time.perf_counter() - eval_start, 2)
+
+        # ---- persist ------------------------------------------------------
+        persist_start = time.perf_counter()
+        evaluated_at = _now()
+        for result in all_results:
+            session.add(Result(
+                result_id=uuid.uuid4(), run_id=run_id,
+                control_id=result["control_id"], resource_id=result["resource_id"],
+                outcome=result["outcome"], evidence=result["evidence"],
+                evaluated_at=evaluated_at,
+            ))
+        run = session.get(Run, run_id)
+        run.completed_at = _now()
+        run.status = "completed"
+        sink.event("scan_completed", "ok",
+                   {"results": len(all_results), "resources": len(all_resources)})
+        session.commit()
+        timings["persist_s"] = round(time.perf_counter() - persist_start, 2)
+        timings["total_s"] = round(time.perf_counter() - t0, 2)
+
+        counts: dict[str, int] = {}
+        for r in all_results:
+            counts[r["outcome"]] = counts.get(r["outcome"], 0) + 1
+        scored = counts.get("pass", 0) + counts.get("fail", 0)
+
+        return {
+            "run_id": str(run_id),
+            "correlation_id": str(correlation_id),
+            "targets": len(targets),
+            "resources": len(all_resources),
+            "results": len(all_results),
+            "outcomes": counts,
+            "compliance_pct": round(100.0 * counts.get("pass", 0) / scored, 1)
+            if scored else None,
+            "timings": timings,
         }
     except Exception:
         session.rollback()

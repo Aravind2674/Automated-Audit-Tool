@@ -1258,6 +1258,265 @@ stops verifying the deployed configuration.
 - **A live scan runs synchronously in the request.** It takes ~20s and will block a
   worker; a real deployment wants a job queue.
 
+---
+
+## Phase 8 — Scale validation (spec Section 7a)
+
+**Date:** 2026-08-27
+**Status:** ✅ **COMPLETE — the 50-host/resource NFR is met, with one real defect found and fixed.**
+
+The original problem statement requires handling "at least 50 simulated
+hosts/resources without redesign". Every run before this used exactly one Linux
+target, so the requirement had zero evidence either way.
+
+### What was built
+
+- **`execute_multi_target_scan()`** in `backend/run_scan.py` — scans N targets in one
+  run, writing one `runs` row and results for every target.
+- **`tests/verify_phase8.py`** — both halves, real timings, rule-8 DB verification.
+
+**What did NOT have to change is the point.** The normalizer, evaluator, control
+schema, persistence layer and dashboard queries are all untouched. `applies_to`
+already fans controls across whatever resources it is handed, so 50 targets needed an
+orchestration loop — not a redesign. That is the NFR's actual wording satisfied.
+
+### AWS: 153 resources
+
+```
+resources normalized : 153   (50 buckets + 51 security groups + 50 volumes + 1 account)
+results persisted    : 155
+outcomes             : {'pass': 86, 'fail': 69}
+collect (moto)       : 0.86s
+evaluate             : 0.00s
+persist              : 0.04s
+TOTAL                : 0.08s
+```
+
+Resources alternate compliant/non-compliant by construction, so the run produces a
+genuine mix rather than a uniform block — a scale run where every resource shares one
+outcome would not exercise aggregation meaningfully.
+
+### Linux: 50 targets — and the honesty caveat
+
+```
+targets              : 50
+resources normalized : 50
+results persisted    : 900
+collect (SSH, seq.)  : 128.42s
+evaluate             : 0.06s
+persist              : 0.12s
+TOTAL                : 128.64s
+per-target average   : 2.57s
+```
+
+> **These are 50 target entries pointing at the SAME demo VM**, with distinct
+> `target_id`s and therefore distinct `resource_id`s
+> (`linux_server:demo-ubuntu-vagrant`, `…-clone-001` … `…-clone-049`).
+>
+> This validates **orchestration, credential handling, database writes and dashboard
+> aggregation across 50 targets. It does NOT validate 50 independent real security
+> postures** — there is one host underneath, so all 50 produce identical findings by
+> construction. Provisioning 50 real VMs is impractical on this hardware; the
+> substitution is deliberate and must not be blurred in any writeup or demo.
+
+**A real behaviour surfaced during setup:** the first attempt failed with
+`SecretsError: no credential stored for target_id '…-clone-001'`. `secrets_manager`
+correctly refuses to serve a credential for an unregistered target. Fixed by
+registering a credential per target — which is exactly what onboarding 50 real hosts
+would involve, and exercises the credential store at scale as a side effect (50
+`credential_used` audit rows, one per target).
+
+### Timing verdict: the synchronous-execution open item is now a REAL problem
+
+Section 7a asked whether synchronous scan execution is a genuine problem at this scale
+or still theoretical. The measurement answers it:
+
+| Stage | Time | Share |
+|---|---|---|
+| SSH collection (sequential) | 128.42s | **99.8%** |
+| Evaluation | 0.06s | 0.05% |
+| Persistence | 0.12s | 0.09% |
+
+**Collection dominates completely.** Evaluation and persistence are effectively free —
+0.18s combined for 900 results — so the engine scales fine. The problem is entirely
+that 50 sequential SSH sessions take over two minutes inside one synchronous HTTP
+request.
+
+That exceeds the default idle timeout of most reverse proxies and load balancers
+(commonly 30–60s). `POST /api/scans` with 50 targets would return a gateway timeout to
+the browser **while the scan continued running server-side** — the worst outcome,
+because the user sees failure and may retry, doubling the load against the same hosts.
+
+Promoted from 🟠 to 🔴. Two fixes, neither in scope here: run collection concurrently
+(the per-host work is independent and I/O-bound, so a thread pool should give close to
+linear speed-up), and return `202 Accepted` with a run_id immediately, polling for
+completion.
+
+### Defect found and fixed: unbounded drift payload
+
+The dashboard shipped **every** drift row to the browser. At 50 targets:
+
+```
+BEFORE:  187,308 bytes total  |  drift_since_previous_run = 192,892 bytes (97%)
+AFTER :   41,017 bytes total  |  drift_since_previous_run =  36,252 bytes
+```
+
+Drift between two runs with different target sets produced 1,055 rows and grew
+linearly with target count. The API still answered in 0.1s, so this was never a
+failure — but an unbounded list to a browser is a defect waiting to become one.
+
+Capped at 100 rows **per category**, with `drift_total` and per-category
+`drift_counts` still returned in full so nothing is hidden. The UI renders
+"1055 changes (900 appeared, 155 disappeared) — showing first 100 per category".
+
+This is the kind of thing only a scale run finds: at one target the drift list is a
+handful of rows and looks perfectly reasonable.
+
+### Rule 8 — independent verification
+
+Every claim re-checked in `psql`, not through the harness's own SQLAlchemy:
+
+```
+   run    | triggered_by | results | distinct_resources | wall_clock_s
+ 755611ef | phase8-scale |     155 |                153 |         0.39
+ c1c65ede | phase8-scale |     900 |                 50 |       128.70
+
+ single_target_results | fifty_target_results | ratio
+                    18 |                  900 |  50.0
+```
+
+Exactly **50.0×** the data, and the DB's own wall-clock (128.70s) matches the
+harness's measurement (128.64s). Also confirmed: all 900 results carry evidence, one
+correlation_id for the whole run, 50 distinct `resource_id`s, and 50 `credential_used`
+rows.
+
+Dashboard aggregation at 900 results: 6 domain rows totalling 900
+(authentication 250, filesystem 200, logging 150, network 150, hardening 100,
+access_control 50), severity counts summing correctly (critical 99, high 199,
+medium 350, low 100), compliance 16.7% — identical to the single-target figure, which
+is exactly right given it is the same VM 50 times.
+
+### Deviations and open items
+
+- **`execute_multi_target_scan` is not exposed via the API.** `POST /api/scans` still
+  scans the single configured target. Multi-target scanning is available through the
+  function and the Phase 8 harness only; wiring it to the endpoint should wait until
+  the synchronous-execution problem above is fixed, since a 50-target scan is exactly
+  the request that would time out.
+- **50 clone credentials remain in the `credentials` table.** Harmless (all the same
+  demo VM key) but they are visible in `bootstrap.py list`. Left in place because
+  deleting them would break the audit trail's reference to targets that were really
+  scanned.
+
+### Phase 8 addendum — two more defects the scale run exposed
+
+Running the full regression *after* the scale runs existed in the database surfaced
+two further problems. Both had been latent since Phase 4 and were invisible at one
+target.
+
+**1. App bug — `accepted_risks()` double-counted findings.**
+
+The query was a plain `JOIN` from `results` to `exceptions`, so a finding covered by
+more than one active exception produced **one row per exception**. Nothing prevents
+several exceptions covering the same `(control_id, resource_id)` — a repeated request,
+overlapping approvals, or a re-request before the previous one lapsed all do it, and
+the Phase 4 harness had itself created three for `CIS-1.4.2` across its runs.
+
+The dashboard's accepted-risk count was inflated accordingly, and the
+`open + accepted == total failing` invariant broke:
+
+```
+BEFORE:  total failing 45  |  OPEN 43  |  ACCEPTED 4   -> 43 + 4 != 45
+AFTER :  total failing 45  |  OPEN 43  |  ACCEPTED 2   -> 43 + 2 == 45
+```
+
+Fixed with `DISTINCT ON (control_id, resource_id)` keeping the exception that expires
+**last**, since that is the one actually governing how long suppression lasts.
+
+Worth noting the blast radius was limited: the dashboard *summary* counts used
+`count(*) FILTER (... EXISTS ...)`, which cannot multiply rows and was always correct.
+Only the itemised accepted-risk list was wrong — so the headline number and the list
+beneath it disagreed, which is arguably worse than both being wrong.
+
+**2. Harness flaw — suppression compared by `control_id` alone.**
+
+`verify_phase4.py` checked that suppressed controls were absent from open findings by
+comparing control ids. That was correct while every run had exactly one target, and
+became wrong the moment a run covered several: in the scale runs `CIS-1.4.2` is
+legitimately **suppressed** on `linux_server:demo-ubuntu-vagrant` and **open** on
+`…-clone-001`, because the exception was only ever granted for the first. The check
+read that correct behaviour as a failure.
+
+Now compares `(control_id, resource_id)` pairs, and `open_findings()` returns
+`resource_id` so it can. Suppression is per finding, and a finding is a control
+against a specific resource.
+
+**Why both matter beyond the fix:** neither is reachable with one target. The Phase 8
+scale run was worth doing for the NFR evidence alone, but it also functioned as the
+first test of assumptions that had quietly been baked in since Phase 4 — that a
+finding maps to at most one exception, and that a control maps to one resource.
+
+### Addendum — 2026-08-27, Phase 7 reconciled against the written spec
+
+Phase 7 was built from the project owner's chat paraphrase, because the updated
+CLAUDE.md never synced to this machine. `CLAUDE_SYNC_v2.md` (sha256 `4e5af7b0…`,
+511 lines — **verified on disk before reading**) made the written text available for
+the first time. Reconciliation follows.
+
+**Matches, no drift:**
+
+| Written requirement | Status |
+|---|---|
+| Session auth on every state-changing endpoint (scan trigger, exception request/approve, report export) | ✅ built, and extended to the read endpoints too |
+| "say so explicitly rather than leaving it ambiguous which endpoints are actually protected" | ✅ the protected/public split is stated in `api/main.py`'s docstring, BUILD_LOG and architecture.md |
+| Prove enforcement with "a real curl call without a session cookie, not a code-reading exercise" | ✅ 7/7 protected endpoints 401 over real HTTP against a running server |
+| Credentials behind `secrets_manager.py` before the phase closes | ✅ Phase-1 TODO closed; live SSH scan with the key decrypted from the Fernet store |
+| Real `POST /api/scans` behind session auth, starting a real scan, returning the new `run_id` | ✅ built |
+| "a 'Run New Scan' button in the dashboard if time allows" | ✅ built (was optional) |
+
+**Gap found and closed on reading the spec:** the written text requires the trigger be
+proven by confirming "a new row appears in `runs` and the dashboard reflects it —
+**without touching the command line**". The original Phase 7 proof used an
+authenticated `curl` and verified the row with `psql` — both command line. Now
+re-proven end to end in the browser: the button produced
+`New run 380f19c4 — 18 results, 16.7% compliant`, the dashboard switched to that run,
+and the trend chart grew from 9 to 10 points. Confirmed independently afterwards in
+the database (`triggered_by=aravind`, 18 results, `credential_used` present because it
+was a live SSH scan).
+
+**Drift, flagged rather than quietly kept:**
+
+> "A single seeded reviewer account is enough; do not build multi-user roles or
+> registration."
+
+Two accounts exist (`aravind`, `priya`) and the `users` table has a `role` column.
+
+*Why two accounts:* Phase 4's acceptance criteria require approving a high/critical
+exception "as a distinct approver from requester". One account cannot demonstrate
+separation of duties through the API at all — the endpoint takes the approver identity
+from the session, so proving the 403/200 pair needs two real identities. The two
+requirements are in genuine tension and the earlier, more specific one was kept.
+
+*On "multi-user roles":* the `role` column is stored and returned by `/api/auth/me`
+but is **not enforced anywhere** — there is no role-based access control, and both
+accounts can reach every endpoint. It is an informational attribute, not a roles
+system. Left in place rather than migrated out, and recorded here so nobody mistakes
+it for implemented authorisation.
+
+*On "registration":* none exists. Accounts are created only by `backend/bootstrap.py`
+from the command line, with the password read from the environment rather than argv.
+
+**Not built (explicitly optional in the spec):** the APScheduler cron option. The
+written text calls the on-demand endpoint "the non-negotiable part" and scheduling "a
+reasonable stretch if time allows". Carried as an open item.
+
+**⚠️ `CLAUDE.md` on disk is missing Section 7a.** It is 485 lines / `ba70c55b…`;
+`CLAUDE_SYNC_v2.md` is 511 lines and differs by exactly the 26-line Section 7a block —
+otherwise identical. Section 11 requires CLAUDE.md to stay current at the repo root
+"so every collaborator's Claude Code session gets the same spec", and as it stands a
+fresh clone gets a spec with no Phase 8 in it. Not overwritten unilaterally, since the
+owner tracks CLAUDE.md by hash and an unannounced change would break that check.
+
 ### Addendum 3 — 2026-08-27, source control and collaboration setup
 
 Prompted by an imminent laptop switch and additional contributors joining.

@@ -264,17 +264,29 @@ statement's own wording. That is orthogonal to what the tool *audits*. The local
 setup here is a deliberate, justified substitution for the demo environment, not a
 shortfall in the deployment story.
 
-### 3.3 Credential handling is not yet wired to `secrets_manager`
+### 3.3 Credential handling — CLOSED in Phase 7
+
+*This was an open gap from Phase 1 to Phase 6 and is recorded here for the history.*
 
 Spec Section 6 requires collectors to obtain credentials via
 `secrets_manager.get_credential(target_id)`, with every call writing a
-`credential_used` audit row. **As of Phase 2 the SSH collector still reads credentials
-from the target dict passed to `collect()`.** This is marked with an explicit `# TODO`
-at `backend/collectors/ssh_collector.py::_connect` naming the Section 6 requirement.
+`credential_used` audit row. From Phase 1 through Phase 6 the SSH collector instead
+read credentials from the target dict passed to `collect()`, carried as an explicit
+`# TODO` naming the Section 6 requirement.
 
-It is deferred, not skipped, and **must close before Phase 7**. Until it does, there
-is no encrypted credential store and no audit trail of credential use — a real gap,
-stated here rather than left for a reviewer to find.
+**Closed in Phase 7.** `backend/secrets_manager.py` is now the only module in the
+project that decrypts anything; the credentials table holds Fernet ciphertext only;
+and every fetch writes a `credential_used` row carrying the `target_id` and never the
+credential. Proved end to end by a live SSH scan whose key was decrypted from the
+store, and again at scale in Phase 8 with 50 targets producing 50 `credential_used`
+rows.
+
+One detail worth keeping: key material is handed to Paramiko **in memory**, never via
+`key_filename`. Writing the key to a temp file to satisfy that parameter would leave
+plaintext key material on the filesystem — precisely what the encrypted store exists
+to prevent.
+
+The residual weakness is key custody, not the cipher — see §4.
 
 ### 3.4 The CERT-In marker taxonomy is not primary-source
 
@@ -291,6 +303,7 @@ it. The same warning is duplicated at `control_library.VALID_CERT_IN_MARKERS` so
 visible at the point of use.
 
 ### 3.5 Scope limits
+
 
 Single-tenant. No auto-remediation — the tool reports and never changes an audited
 host. No SIEM or ticketing integration. No SSO/OAuth; session-based auth only. Two
@@ -350,6 +363,66 @@ reconciled for Linux. Until that happens, Phase 5 stays open.
 This is the same category of deliberate, documented substitution as Vagrant-for-Docker
 (§3.2) and is recorded here for the same reason: so that nobody reading a compliance
 report from this tool mistakes a mocked result for a measured one.
+
+### 3.7 Scale: 50 targets validated, with one important caveat
+
+The NFR requiring "at least 50 simulated hosts/resources without redesign" is met and
+measured (Phase 8). **AWS**: 153 genuinely distinct mocked resources. **Linux**: 50
+targets, 900 results, 128.6s.
+
+> ⚠️ **The 50 Linux targets all point at the SAME demo VM**, with distinct
+> `target_id`s and `resource_id`s. This validates orchestration, credential handling,
+> database writes and dashboard aggregation across 50 targets. It does **not** validate
+> 50 independent real security postures — there is one host underneath, so all 50
+> produce identical findings by construction. Provisioning 50 real VMs is impractical
+> on this hardware; the substitution is deliberate and must not be blurred.
+
+**Nothing was redesigned.** The normalizer, evaluator, control schema, persistence
+layer and dashboard queries were untouched — `applies_to` already fans controls across
+whatever resources it is given, so 50 targets needed an orchestration loop and nothing
+more. That is the NFR's actual wording satisfied, not merely its number.
+
+**The timing turns a previously-theoretical risk into a real one:**
+
+| Stage | Time | Share |
+|---|---|---|
+| SSH collection (sequential) | 128.42s | 99.8% |
+| Evaluation | 0.06s | 0.05% |
+| Persistence | 0.12s | 0.09% |
+
+The engine scales fine — 900 results evaluated and persisted in 0.18s combined. The
+problem is entirely that 50 sequential SSH sessions take over two minutes inside one
+synchronous HTTP request, which exceeds the default idle timeout of most reverse
+proxies and load balancers (commonly 30–60s). `POST /api/scans` at this scale would
+return a gateway timeout to the browser **while the scan kept running server-side** —
+the worst available outcome, because the user sees failure and may retry, doubling the
+load against the same hosts. Fixes, neither in scope for Phase 8: collect concurrently
+(the per-host work is independent and I/O-bound), and return `202 Accepted` with a
+run_id immediately, polling for completion.
+
+**A scale-only defect, found and fixed:** the dashboard shipped every drift row to the
+browser — 192 KB of a 187 KB payload at 50 targets, growing linearly with target
+count. Now capped at 100 rows per category, with the full `drift_total` and
+per-category `drift_counts` still returned so nothing is hidden. At one target the
+drift list is a handful of rows and looks entirely reasonable, which is exactly why
+only a scale run surfaces it.
+
+### 3.8 Session cookie Secure flag is environment-conditional
+
+`SECURE_COOKIES` (env var, default `false`) controls whether the session cookie
+carries the `Secure` attribute. Neither hardcoded value is correct:
+
+* Hardcoding `True` breaks local development outright — browsers refuse to store a
+  Secure cookie delivered over plain http, so login fails on localhost with no error
+  message that explains why.
+* Hardcoding `False` is a real vulnerability the moment this sits behind TLS: the
+  session cookie would be transmitted over an unencrypted connection if anything
+  downgraded the request, handing over the session.
+
+Default `false` so a fresh clone works on localhost. **Any real deployment must set
+`SECURE_COOKIES=true`.** The value is echoed in the login response and printed at
+startup, so a misconfigured production instance announces itself rather than being
+silently insecure.
 
 ---
 

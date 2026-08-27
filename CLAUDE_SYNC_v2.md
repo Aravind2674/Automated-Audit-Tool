@@ -362,6 +362,32 @@ assignment is actually asking for.
 
 ---
 
+## 7a. Phase 8 — Scale validation (untested NFR, catch before calling this finished)
+
+The original problem statement's non-functional requirements include: "should handle
+at least 50 simulated hosts/resources without redesign." This has never been
+exercised — every run so far has used exactly one Linux target. This is graded,
+explicit, and currently has zero evidence either way.
+
+- **AWS side**: straightforward — generate 50 mocked resources (S3 buckets,
+  security groups, etc.) via moto and confirm the evaluator/orchestrator handles
+  the volume, with real timing recorded.
+- **Linux side**: provisioning 50 real Vagrant VMs is not practical given how long
+  a single VM took to provision on this hardware. Register 50 target entries
+  pointing at the same demo VM (distinct `resource_id`s, same underlying host) to
+  test that the orchestrator, database writes, and dashboard aggregation scale
+  correctly across 50 targets. Document explicitly in architecture.md that this
+  validates orchestration/DB/UI scale, not 50 independent real security
+  postures — it's the same VM under the hood, and that distinction must not be
+  blurred in the writeup.
+- Report actual wall-clock timing for a 50-target scan — this is what determines
+  whether the synchronous scan execution already noted as an open item (Phase 7's
+  🟠 list) is a real problem at this scale or still just a theoretical one.
+- Apply rule 8: independently confirm the database actually holds 50x the results
+  of a single-target run, not just that the process exited without error.
+
+---
+
 ## 8. Explicit non-goals for this build — do not implement unless asked
 
 - OPA/Rego — custom evaluator only (Section 1)

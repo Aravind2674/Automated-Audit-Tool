@@ -222,17 +222,31 @@ _ACTIVE_EXCEPTION = """
 """
 
 OPEN_FINDINGS_SQL = f"""
-SELECT res.control_id, c.severity, c.title, res.outcome
+SELECT res.control_id, res.resource_id, c.severity, c.title, res.outcome
 FROM results res JOIN controls c ON c.id = res.control_id
 WHERE res.run_id = :run_id
   AND res.outcome = 'fail'
   AND NOT EXISTS ({_ACTIVE_EXCEPTION})
 ORDER BY CASE c.severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1
-                         WHEN 'medium' THEN 2 ELSE 3 END, res.control_id
+                         WHEN 'medium' THEN 2 ELSE 3 END,
+         res.control_id, res.resource_id
 """
 
+#: One row per SUPPRESSED FINDING, not per matching exception.
+#:
+#: Bug found in Phase 8: this was a plain JOIN, so a finding covered by more than one
+#: active exception produced one row per exception. Nothing is stopping several
+#: exceptions covering the same (control, resource) -- repeated requests, overlapping
+#: approvals, a re-request before the previous one lapsed -- and the dashboard's
+#: "accepted risk" count was inflated accordingly, breaking the
+#: `open + accepted == total failing` invariant.
+#:
+#: DISTINCT ON collapses them to one row per finding, keeping the exception that
+#: expires LAST, since that is the one actually governing how long the suppression
+#: lasts.
 ACCEPTED_RISK_SQL = f"""
-SELECT res.control_id, c.severity, res.outcome,
+SELECT DISTINCT ON (res.control_id, res.resource_id)
+       res.control_id, res.resource_id, c.severity, res.outcome,
        e.exception_id, e.status, e.requested_by, e.approved_by,
        e.expiry_date, e.justification
 FROM results res
@@ -244,7 +258,7 @@ WHERE res.run_id = :run_id
   AND e.approved_by IS NOT NULL
   AND e.status IN ('accepted_risk', 'false_positive')
   AND e.expiry_date > :as_of
-ORDER BY e.expiry_date
+ORDER BY res.control_id, res.resource_id, e.expiry_date DESC
 """
 
 EXPIRED_EXCEPTIONS_SQL = """

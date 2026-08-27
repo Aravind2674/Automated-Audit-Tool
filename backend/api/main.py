@@ -21,6 +21,7 @@ from __future__ import annotations
 import datetime
 import io
 import json
+import os
 import pathlib
 import sys
 import uuid
@@ -66,7 +67,44 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+def _env_flag(name: str, default: bool = False) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in ("1", "true", "yes", "on")
+
+
+#: Whether to set the `Secure` flag on the session cookie.
+#:
+#: Environment-conditional rather than hardcoded either way:
+#:
+#: * Hardcoding True breaks local development outright — browsers refuse to store a
+#:   Secure cookie sent over plain http, so login would silently fail on localhost
+#:   with no error to explain it.
+#: * Hardcoding False is a real vulnerability the moment this is deployed behind TLS:
+#:   a session cookie without Secure will be transmitted over an unencrypted
+#:   connection if anything ever downgrades the request, handing over the session.
+#:
+#: Default is False so `git clone && run` works on localhost. **Any real deployment
+#: must set SECURE_COOKIES=true**, and the value is echoed in the login response and
+#: logged at startup so a misconfigured production instance is visible rather than
+#: silently insecure.
+SECURE_COOKIES = _env_flag("SECURE_COOKIES", default=False)
+
+#: Max drift rows returned PER CATEGORY. See the dashboard endpoint for why.
+DRIFT_ROW_CAP = 100
+
 _Session = None
+
+
+@app.on_event("startup")
+def _warn_if_insecure_cookies() -> None:
+    if not SECURE_COOKIES:
+        print(
+            "[audit-tool] SECURE_COOKIES=false -- session cookies are NOT marked "
+            "Secure. Correct for local http development; set SECURE_COOKIES=true "
+            "for any deployment behind TLS."
+        )
 
 
 def _sessionmaker():
@@ -174,13 +212,13 @@ def login(response: Response, body: dict = Body(...)) -> dict:
 
     response.set_cookie(
         SESSION_COOKIE, session_id,
-        httponly=True,      # not readable from JavaScript -> XSS cannot steal it
-        samesite="lax",     # not sent on cross-site POSTs -> basic CSRF resistance
-        secure=False,       # localhost is http; MUST become True behind TLS
+        httponly=True,        # not readable from JavaScript -> XSS cannot steal it
+        samesite="lax",       # not sent on cross-site POSTs -> basic CSRF resistance
+        secure=SECURE_COOKIES,  # see the constant's definition
         max_age=8 * 3600,
         path="/",
     )
-    return {"status": "ok", "username": username}
+    return {"status": "ok", "username": username, "secure_cookies": SECURE_COOKIES}
 
 
 # ---------------------------------------------------------------------------
@@ -214,18 +252,36 @@ def dashboard(run_id: str | None = Query(default=None),
         exceptions = open_exceptions(conn)
         trend = compliance_trend(conn)
 
-        drift = []
+        # Drift is CAPPED before serialisation.
+        #
+        # Phase 8 finding: at 50 targets, drift between two runs with different target
+        # sets produced ~1000 rows and 192 KB of JSON -- 97% of the entire dashboard
+        # payload -- and it grows linearly with target count. The API answered in
+        # 0.1s, so this was never a failure, but shipping an unbounded list to a
+        # browser is a defect waiting to become one at 500 targets.
+        #
+        # The full counts are still reported per category, so nothing is hidden: the
+        # UI can say "748 regressed (showing 100)" rather than silently truncating.
+        drift, drift_counts, drift_total = [], {}, 0
         if len(trend) >= 2:
             rows = drift_between(conn, trend[-2]["run_id"], trend[-1]["run_id"])
-            drift = [{"kind": kind, **_jsonable(row)}
-                     for kind, rows_ in classify_drift(rows).items() for row in rows_]
+            buckets = classify_drift(rows)
+            drift_counts = {kind: len(v) for kind, v in buckets.items() if v}
+            drift_total = sum(drift_counts.values())
+            for kind, rows_ in buckets.items():
+                for row in rows_[:DRIFT_ROW_CAP]:
+                    drift.append({"kind": kind, **_jsonable(row)})
 
     return _jsonable({
         "run_id": str(run),
         "generated_at": datetime.datetime.now(datetime.timezone.utc),
         "summary": summary, "per_domain": domains,
         "open_findings_by_severity": severities, "exceptions": exceptions,
-        "trend": trend, "drift_since_previous_run": drift,
+        "trend": trend,
+        "drift_since_previous_run": drift,
+        "drift_counts": drift_counts,
+        "drift_total": drift_total,
+        "drift_row_cap": DRIFT_ROW_CAP,
         "viewer": identity["username"],
     })
 

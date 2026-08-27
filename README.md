@@ -20,6 +20,7 @@ anything — it defines the phase order, the schemas, and the rules the code fol
 | 5 — AWS collector | ⚠️ code complete, **moto-mocked only** — open pending real-account validation |
 | 6 — Dashboard + report export | ✅ complete, verified |
 | 7 — Audit log + session auth + security review | ✅ complete, verified |
+| 8 — Scale validation (50 hosts/resources) | ✅ complete, verified |
 
 Latest scan of the demo VM: **3 pass, 15 fail, 16.7% compliance**, every verdict
 independently confirmed on the host.
@@ -309,6 +310,22 @@ Phase 7 — auth enforcement over real HTTP, secrets_manager, audit sweep, secre
 ./venv/Scripts/python.exe tests/verify_phase7.py
 ```
 
+Phase 8 — scale validation (50 AWS resources + 50 Linux targets), with real timings
+and independent DB verification. The Linux half needs the demo VM running:
+
+```bash
+./venv/Scripts/python.exe tests/verify_phase8.py --targets 50
+```
+
+```bash
+./venv/Scripts/python.exe tests/verify_phase8.py --targets 5
+```
+
+> The 50 Linux "targets" all point at the **same** demo VM with distinct
+> `resource_id`s. That validates orchestration, database writes and dashboard
+> aggregation at scale — **not** 50 independent real security postures. See
+> `architecture.md` §3.7.
+
 ---
 
 ## 6. Run the dashboard
@@ -345,9 +362,11 @@ Separation of duties needs a second identity for approving high/critical excepti
 AUDIT_PASSWORD='a-different-strong-password' ./venv/Scripts/python.exe backend/bootstrap.py create-user priya --role approver
 ```
 
-> ⚠️ **The session cookie is set with `secure=False`** because the demo runs over plain
-> HTTP on localhost. **Set it to `True` before deploying behind TLS** — a session cookie
-> without the Secure flag can be sent over an unencrypted connection.
+> ⚠️ **Session cookie `Secure` flag.** Controlled by the `SECURE_COOKIES` env var,
+> default `false`. Leave it false for local http development — browsers refuse to
+> store a Secure cookie over plain http, so login would fail with no useful error.
+> **Set `SECURE_COOKIES=true` for any deployment behind TLS.** The value is echoed in
+> the login response and logged at startup so a misconfigured instance is visible.
 
 Export a PDF report (requires a session cookie):
 

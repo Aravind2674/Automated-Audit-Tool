@@ -43,6 +43,7 @@ type Payload = {
   run_id: string; generated_at: string; summary: Summary;
   per_domain: Domain[]; open_findings_by_severity: Record<string, number>;
   exceptions: Exc[]; trend: TrendRow[]; drift_since_previous_run: DriftRow[];
+  drift_counts: Record<string, number>; drift_total: number; drift_row_cap: number;
   viewer: string;
 };
 
@@ -127,6 +128,34 @@ export default function Dashboard() {
       .catch((e) => setError(String(e)));
   }, [reloadKey]);
 
+  // FR5: "the same audit can be re-executed on demand" -- a user-facing action, not
+  // a developer running a Python file. Hits the authenticated POST /api/scans and
+  // reloads so the new run_id becomes the dashboard's latest completed run.
+  const [scanning, setScanning] = useState(false);
+  const [scanMsg, setScanMsg] = useState<string | null>(null);
+
+  async function runScan(mode: "cached" | "live") {
+    setScanning(true);
+    setScanMsg(null);
+    try {
+      const r = await fetch(`${API}/api/scans`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ mode }),
+      });
+      if (r.status === 401) { setNeedsLogin(true); return; }
+      const body = await r.json();
+      if (!r.ok) { setScanMsg(`Scan failed: ${body.detail ?? r.status}`); return; }
+      setScanMsg(`New run ${String(body.run_id).slice(0, 8)} — ${body.results} results, ${body.compliance_pct}% compliant`);
+      setReloadKey((k) => k + 1);
+    } catch (e) {
+      setScanMsg(`Scan failed: ${String(e)}`);
+    } finally {
+      setScanning(false);
+    }
+  }
+
   async function logout() {
     await fetch(`${API}/api/auth/logout`, { method: "POST", credentials: "include" });
     setData(null);
@@ -153,6 +182,10 @@ export default function Dashboard() {
           <span className="text-xs text-slate-500">
             signed in as <span className="font-medium">{data.viewer}</span>
           </span>
+          <button onClick={() => runScan("live")} disabled={scanning}
+                  className="rounded-md bg-teal-700 px-4 py-2 text-sm font-medium text-white hover:bg-teal-600 disabled:opacity-50">
+            {scanning ? "Scanning…" : "Run New Scan"}
+          </button>
           <a href={`${API}/api/reports/pdf`}
              className="rounded-md bg-slate-800 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700">
             Export PDF report
@@ -163,6 +196,12 @@ export default function Dashboard() {
           </button>
         </div>
       </header>
+
+      {scanMsg && (
+        <p className="rounded-md bg-teal-50 p-3 text-sm text-teal-900 ring-1 ring-teal-200">
+          {scanMsg}
+        </p>
+      )}
 
       <section className="grid grid-cols-2 gap-4 md:grid-cols-4">
         <Card label="Overall compliance" value={`${s.compliance_pct ?? "n/a"}%`}
@@ -232,6 +271,13 @@ export default function Dashboard() {
           <div className="mt-4">
             <h3 className="mb-2 text-xs font-semibold uppercase text-slate-500">
               Drift since previous run
+              {data.drift_total > data.drift_since_previous_run.length && (
+                <span className="ml-2 font-normal normal-case text-slate-400">
+                  {data.drift_total} changes (
+                  {Object.entries(data.drift_counts).map(([k, v]) => `${v} ${k}`).join(", ")}
+                  ) — showing first {data.drift_row_cap} per category
+                </span>
+              )}
             </h3>
             <ul className="space-y-1 text-sm">
               {data.drift_since_previous_run.map((d, i) => (

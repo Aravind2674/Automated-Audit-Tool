@@ -211,11 +211,20 @@ def show_views() -> None:
                   all(r["outcome"] == "fail" for r in accepted),
                   "an exception must never rewrite the evidence")
 
-        suppressed = {r["control_id"] for r in accepted}
-        open_ids = {r["control_id"] for r in openf}
+        # Compared as (control_id, resource_id) PAIRS, not control_id alone.
+        #
+        # Suppression is per finding, and a finding is a control against a specific
+        # resource. Comparing by control_id was wrong the moment a run covered more
+        # than one target: in the Phase 8 scale runs the same control legitimately
+        # appears suppressed on `demo-ubuntu-vagrant` and open on `…-clone-001`,
+        # because the exception was only ever granted for the first. The old check
+        # read that correct behaviour as a failure.
+        suppressed = {(r["control_id"], r["resource_id"]) for r in accepted}
+        open_pairs = {(r["control_id"], r["resource_id"]) for r in openf}
         if suppressed:
-            check("suppressed controls absent from OPEN FINDINGS",
-                  not (suppressed & open_ids), str(suppressed & open_ids))
+            overlap = suppressed & open_pairs
+            check("suppressed findings absent from OPEN FINDINGS",
+                  not overlap, str(sorted(overlap)[:3]))
 
 
 def show_expiry_status() -> None:
