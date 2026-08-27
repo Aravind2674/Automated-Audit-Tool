@@ -1,0 +1,43 @@
+id: CIS-4.1.2
+title: Ensure audit logs are retained and not silently discarded when storage fills
+framework_mappings:
+  cis_linux_v8: "4.1.2"
+  nist_csf: "PR.PT-1"
+  soc2: "CC7.2"
+  cert_in_marker: "DET"
+severity: medium
+category: logging
+description: >
+  Verifies that auditd is configured to preserve its logs rather than quietly overwrite
+  or delete them, and to raise an alert as the audit partition approaches capacity. The
+  default behaviour on many builds is to rotate through a fixed number of files and drop
+  the oldest without notice, which means the records covering an intrusion can be erased
+  by ordinary log volume before anyone looks for them. This control checks the
+  disposition on log rotation, the retained file count, and the actions configured for
+  the low-space and no-space conditions.
+applies_to: [linux_server]
+test_logic:
+  collector: auditd
+  operator: all_of
+  checks:
+    - check: "max_log_file_action"
+      operator: in
+      expected: ["keep_logs"]
+    - check: "num_logs"
+      operator: gte
+      expected: 5
+    - check: "space_left_action"
+      operator: in
+      expected: ["email", "exec", "syslog"]
+    - check: "admin_space_left_action"
+      operator: in
+      expected: ["halt", "single"]
+remediation: >
+  In /etc/audit/auditd.conf set "max_log_file_action = keep_logs" so rotated files are
+  retained, raise "num_logs" to at least 5, set "space_left_action = email" (or syslog)
+  so the low-space condition is announced, and set "admin_space_left_action = single"
+  so the host degrades to single-user mode rather than continuing to run unaudited when
+  space is exhausted. Restart the daemon with "systemctl restart auditd". Size the
+  filesystem holding /var/log/audit deliberately, and preferably place it on its own
+  partition, since keep_logs means audit data will accumulate until the disk is full.
+scored: true

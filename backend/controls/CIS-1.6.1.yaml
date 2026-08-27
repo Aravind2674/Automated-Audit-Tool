@@ -1,0 +1,47 @@
+id: CIS-1.6.1
+title: Ensure automatic security updates are enabled
+framework_mappings:
+  cis_linux_v8: "1.6.1"
+  nist_csf: "PR.IP-12"
+  soc2: "CC7.1"
+  cert_in_marker: "IMP"
+severity: medium
+category: hardening
+description: >
+  Verifies that the unattended-upgrades mechanism is installed, enabled, and configured
+  to apply security updates without manual intervention. The interval between a
+  vulnerability becoming public and it being exploited at scale is routinely measured in
+  days, and hosts patched on a manual cycle spend most of that window exposed. This
+  check confirms the package is present, that the periodic update and upgrade settings
+  are switched on, and that the security pocket is among the configured origins, since
+  the service can be running while configured to install nothing.
+applies_to: [linux_server]
+test_logic:
+  collector: unattended_upgrades
+  operator: all_of
+  checks:
+    - check: "installed"
+      operator: equals
+      expected: true
+    - check: "enabled_at_boot"
+      operator: equals
+      expected: true
+    - check: "update_package_lists"
+      operator: equals
+      expected: 1
+    - check: "unattended_upgrade_interval"
+      operator: gte
+      expected: 1
+    - check: "security_origin_configured"
+      operator: equals
+      expected: true
+remediation: >
+  Install with "apt install unattended-upgrades", then set both
+  APT::Periodic::Update-Package-Lists and APT::Periodic::Unattended-Upgrade to "1" in
+  /etc/apt/apt.conf.d/20auto-upgrades, and confirm the security origin pattern is not
+  commented out in /etc/apt/apt.conf.d/50unattended-upgrades. Test the configuration
+  without applying changes using "unattended-upgrade --dry-run --debug". Decide
+  deliberately whether to also enable automatic reboots, since kernel updates do not
+  take effect until the host restarts, but an unscheduled reboot on a production host
+  carries its own risk.
+scored: true

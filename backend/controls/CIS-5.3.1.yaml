@@ -1,0 +1,30 @@
+id: CIS-5.3.1
+title: Ensure a minimum password length of 14 characters is enforced
+framework_mappings:
+  cis_linux_v8: "5.3.1"
+  nist_csf: "PR.AC-1"
+  soc2: "CC6.1"
+  cert_in_marker: "IMP"
+severity: medium
+category: authentication
+description: >
+  Verifies that the password quality module rejects new passwords shorter than fourteen
+  characters. Length is the single largest contributor to the cost of an offline cracking
+  attack against a captured password hash, far more so than character-class rules. This
+  check reads the pam_pwquality configuration rather than the legacy PASS_MIN_LEN setting
+  in /etc/login.defs, because on PAM-based distributions login.defs no longer governs
+  password composition and a value set there alone is inert.
+applies_to: [linux_server]
+test_logic:
+  collector: pwquality
+  check: "minlen"
+  operator: gte
+  expected: 14
+remediation: >
+  Set "minlen = 14" in /etc/security/pwquality.conf, or in a drop-in file under
+  /etc/security/pwquality.conf.d/. Confirm that pam_pwquality.so is actually referenced
+  in the password stack of /etc/pam.d/common-password, since the configuration file has
+  no effect if the module is not invoked. Existing passwords are not retroactively
+  validated, so plan a rotation for accounts whose current password would not satisfy
+  the new rule.
+scored: true

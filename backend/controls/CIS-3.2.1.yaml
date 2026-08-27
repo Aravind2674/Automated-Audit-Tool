@@ -1,0 +1,39 @@
+id: CIS-3.2.1
+title: Ensure IP forwarding is disabled on hosts that are not routers
+framework_mappings:
+  cis_linux_v8: "3.2.1"
+  nist_csf: "PR.AC-5"
+  soc2: "CC6.6"
+  cert_in_marker: "PRO"
+severity: medium
+category: network
+description: >
+  Verifies that the kernel does not forward IPv4 or IPv6 packets between interfaces.
+  A general-purpose server with forwarding enabled will relay traffic between the
+  networks it is attached to, which can bridge a segmentation boundary that the network
+  design assumes is intact and give an attacker on one segment a path into another.
+  Both the currently running kernel values and the persisted sysctl configuration are
+  collected, because a running value set by hand is lost at reboot and a persisted value
+  that has not been applied is not yet in force. Note that hosts which legitimately route
+  traffic, including container and virtualisation hosts, will fail this control by design;
+  those cases belong in the exception workflow with the host role recorded as the
+  justification, not in a weakened control definition.
+applies_to: [linux_server]
+test_logic:
+  collector: sysctl
+  operator: all_of
+  checks:
+    - check: "net.ipv4.ip_forward"
+      operator: equals
+      expected: 0
+    - check: "net.ipv6.conf.all.forwarding"
+      operator: equals
+      expected: 0
+remediation: >
+  Set "net.ipv4.ip_forward = 0" and "net.ipv6.conf.all.forwarding = 0" in a file under
+  /etc/sysctl.d/, apply them to the running kernel with "sysctl --system", and flush the
+  route cache. Check for a conflicting value in /etc/sysctl.conf or an earlier-loading
+  drop-in file, since the last matching file to load wins. If the host is a router,
+  container host or VPN gateway, leave forwarding enabled and file an exception naming
+  the role rather than changing the setting.
+scored: true

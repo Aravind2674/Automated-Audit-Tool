@@ -1,0 +1,48 @@
+# SYNTHETIC TEST FIXTURE -- NOT A REAL CONTROL.
+#
+# This file exists solely to exercise the `scored: false -> manual_review` path
+# required by CLAUDE.md Section 5. It deliberately lives in tests/fixtures/ and NOT
+# in backend/controls/, because:
+#
+#   * load_controls() globs backend/controls/ only, so this file is never part of
+#     the 18-control library;
+#   * it must never appear in the dashboard, in exported reports, or in any
+#     compliance percentage.
+#
+# tests/test_control_library.py asserts both of those properties. If this file ever
+# shows up in a real run, that test has been broken and the leak is a bug.
+#
+# The id prefix is TEST- rather than CIS- so that a stray row in any table is
+# immediately identifiable as fixture contamination.
+
+id: TEST-MANUAL-REVIEW-001
+title: Ensure SSH host key rotation is governed by a documented procedure
+framework_mappings:
+  cis_linux_v8: "TEST.0.0"
+  nist_csf: "PR.AC-1"
+  soc2: "CC6.1"
+  cert_in_marker: "IMP"
+severity: medium
+category: authentication
+description: >
+  Synthetic fixture used only to test the manual_review evaluation path. It is modelled
+  on a genuinely unautomatable requirement: whether an organisation has a written,
+  followed procedure for rotating SSH host keys and distributing the new fingerprints
+  to clients. A collector can read the host keys and their creation dates, but it
+  cannot determine whether a procedure exists, whether anyone follows it, or whether
+  fingerprint changes were communicated. Scoring it pass or fail from collected state
+  alone would assert something the evidence does not support, which is exactly the
+  situation manual_review exists for.
+applies_to: [linux_server]
+test_logic:
+  collector: ssh_config
+  check: "HostKey"
+  operator: not_equals
+  expected: null
+remediation: >
+  Synthetic fixture -- not real remediation guidance. In a real control of this shape
+  the remediation would direct the auditor to obtain the written key rotation
+  procedure, confirm the date of the last rotation against the host key file
+  timestamps collected as evidence, and record the reviewer and review date alongside
+  the finding.
+scored: false

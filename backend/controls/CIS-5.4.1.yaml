@@ -1,0 +1,40 @@
+id: CIS-5.4.1
+title: Ensure account lockout is configured for repeated failed authentication attempts
+framework_mappings:
+  cis_linux_v8: "5.4.1"
+  nist_csf: "PR.AC-7"
+  soc2: "CC6.1"
+  cert_in_marker: "IMP"
+severity: high
+category: authentication
+description: >
+  Verifies that PAM locks an account after a bounded number of consecutive failed
+  authentication attempts and holds it locked for a defined interval. Without a lockout
+  threshold an attacker can attempt passwords at whatever rate the service will accept,
+  turning a weak or guessable password into a reliable entry point. The check reads
+  faillock configuration and confirms the module is actually wired into the PAM
+  authentication stack, since a configuration file with no corresponding module entry
+  enforces nothing.
+applies_to: [linux_server]
+test_logic:
+  collector: pam_faillock
+  operator: all_of
+  checks:
+    - check: "module_enabled"
+      operator: equals
+      expected: true
+    - check: "deny"
+      operator: lte
+      expected: 5
+    - check: "unlock_time"
+      operator: gte
+      expected: 900
+remediation: >
+  Set "deny = 5" and "unlock_time = 900" in /etc/security/faillock.conf, then ensure
+  pam_faillock.so is present in the auth stack of /etc/pam.d/common-auth with both the
+  preauth and authfail entries. On Debian and Ubuntu the supported way to make that
+  change survive package updates is to edit the profile consumed by pam-auth-update
+  rather than hand-editing common-auth. Set unlock_time to a non-zero value: zero means
+  the account stays locked until an administrator clears it manually, which is a
+  denial-of-service risk an attacker can trigger deliberately.
+scored: true

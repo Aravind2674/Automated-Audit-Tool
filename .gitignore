@@ -1,0 +1,67 @@
+# ---------------------------------------------------------------------------
+# Secrets -- CLAUDE.md Section 6. Never commit.
+# ---------------------------------------------------------------------------
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.p12
+secrets.json
+credentials.json
+
+# ---------------------------------------------------------------------------
+# Python
+# ---------------------------------------------------------------------------
+venv/
+.venv/
+env/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ---------------------------------------------------------------------------
+# Node / Next.js (frontend, Phase 6)
+# ---------------------------------------------------------------------------
+node_modules/
+.next/
+out/
+build/
+npm-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# ---------------------------------------------------------------------------
+# Vagrant VM state -- per-machine, must not travel between laptops
+# ---------------------------------------------------------------------------
+.vagrant/
+*.box
+
+# ---------------------------------------------------------------------------
+# Collected audit evidence.
+#
+# phase1_raw_output.json contains the full configuration of an audited host --
+# sshd config, PAM stack, sudoers, firewall rules, account aging. For the throwaway
+# demo VM that is harmless, but committing it trains the wrong habit: point this
+# tool at a real server and the same file becomes a detailed map of that host's
+# weaknesses. Keep collected evidence out of source control as a rule, not as a
+# judgement call made per-file.
+# ---------------------------------------------------------------------------
+phase1_raw_output.json
+*_raw_output.json
+evidence/
+*.log
+
+# ---------------------------------------------------------------------------
+# OS / editor noise
+# ---------------------------------------------------------------------------
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+*.swp
+*~

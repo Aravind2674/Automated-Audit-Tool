@@ -1,0 +1,39 @@
+id: CIS-1.4.2
+title: Ensure permissions on /etc/shadow are restricted to 640 or stricter with root ownership
+framework_mappings:
+  cis_linux_v8: "1.4.2"
+  nist_csf: "PR.AC-4"
+  soc2: "CC6.1"
+  cert_in_marker: "IMP"
+severity: critical
+category: filesystem
+description: >
+  Verifies that /etc/shadow is owned by root, grouped to root or shadow, and carries
+  permission bits no more permissive than 640, with no world access whatsoever. This
+  file holds the hashed passwords for every local account. Any user who can read it can
+  copy the hashes off the host and attack them offline at whatever rate their hardware
+  allows, with no lockout, no logging and no time limit; a weak or reused password then
+  falls in minutes. This is the single most consequential file permission on the system,
+  which is why the control is rated critical.
+applies_to: [linux_server]
+test_logic:
+  collector: file_permissions
+  operator: all_of
+  checks:
+    - check: "/etc/shadow.mode"
+      operator: mode_at_most
+      expected: "640"
+    - check: "/etc/shadow.owner"
+      operator: equals
+      expected: "root"
+    - check: "/etc/shadow.group"
+      operator: in
+      expected: ["root", "shadow"]
+remediation: >
+  On Debian and Ubuntu the expected state is "chown root:shadow /etc/shadow" with
+  "chmod 640 /etc/shadow"; on distributions that do not use a shadow group, root:root
+  with mode 000 is correct, since root bypasses the permission check regardless. If this
+  file was found readable by other users, assume the hashes have been exfiltrated:
+  correct the permissions, then force a password change for every local account rather
+  than treating the permission fix alone as the remediation.
+scored: true

@@ -1,0 +1,45 @@
+id: CIS-5.2.11
+title: Ensure SSH is restricted to protocol 2 and approved cryptographic algorithms
+framework_mappings:
+  cis_linux_v8: "5.2.11"
+  nist_csf: "PR.DS-2"
+  soc2: "CC6.7"
+  cert_in_marker: "IMP"
+severity: high
+category: authentication
+description: >
+  Verifies that the SSH daemon negotiates only the version 2 protocol and that the
+  offered ciphers, message authentication codes and key exchange algorithms exclude
+  those with known cryptographic weaknesses. SSH protocol 1 has structural flaws that
+  permit session tampering; legacy ciphers such as single-DES, RC4 (arcfour) and CBC-mode
+  block ciphers, along with MD5 and 96-bit-truncated MACs, are vulnerable to practical
+  attacks against confidentiality or integrity. Modern OpenSSH removed protocol 1
+  entirely, so on current builds this control is chiefly about the algorithm lists an
+  administrator may have widened for compatibility with old clients.
+applies_to: [linux_server]
+test_logic:
+  collector: ssh_config
+  operator: all_of
+  checks:
+    - check: "Ciphers"
+      operator: contains_none
+      expected: ["3des-cbc", "aes128-cbc", "aes192-cbc", "aes256-cbc", "arcfour", "arcfour128", "arcfour256", "blowfish-cbc", "cast128-cbc", "rijndael-cbc@lysator.liu.se"]
+    - check: "MACs"
+      operator: contains_none
+      expected: ["hmac-md5", "hmac-md5-96", "hmac-ripemd160", "hmac-sha1", "hmac-sha1-96", "umac-64@openssh.com", "hmac-md5-etm@openssh.com", "hmac-md5-96-etm@openssh.com", "hmac-sha1-etm@openssh.com", "hmac-sha1-96-etm@openssh.com", "umac-64-etm@openssh.com"]
+    - check: "KexAlgorithms"
+      operator: contains_none
+      expected: ["diffie-hellman-group1-sha1", "diffie-hellman-group14-sha1", "diffie-hellman-group-exchange-sha1", "gss-gex-sha1-", "gss-group1-sha1-", "gss-group14-sha1-"]
+    - check: "Protocol"
+      operator: equals_or_absent
+      expected: "2"
+remediation: >
+  Set explicit algorithm lists in /etc/ssh/sshd_config containing only strong choices,
+  for example Ciphers limited to chacha20-poly1305@openssh.com and the AES-GCM/CTR
+  variants, MACs limited to the encrypt-then-MAC SHA-2 variants, and KexAlgorithms
+  limited to curve25519-sha256 and the SHA-2 group-exchange methods. On OpenSSH 7.6
+  and later the Protocol directive no longer exists and protocol 1 is unavailable, so
+  its absence is acceptable; on older builds set "Protocol 2" explicitly. Verify the
+  resulting effective lists with "sshd -T" and confirm your management clients can still
+  negotiate before restarting the daemon.
+scored: true

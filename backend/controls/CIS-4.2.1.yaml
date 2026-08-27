@@ -1,0 +1,38 @@
+id: CIS-4.2.1
+title: Ensure system logs are forwarded to a remote log host
+framework_mappings:
+  cis_linux_v8: "4.2.1"
+  nist_csf: "DE.AE-3"
+  soc2: "CC7.2"
+  cert_in_marker: "DET"
+severity: medium
+category: logging
+description: >
+  Verifies that rsyslog or systemd-journald is configured to send log records to a
+  collector on another host. Logs stored only on the machine that produced them are
+  under the control of anyone who compromises that machine, and clearing them is a
+  routine step in covering an intrusion. Forwarding puts a copy beyond the reach of the
+  compromised host and makes correlation across systems possible. Either a rsyslog
+  forwarding action or a journald upload configuration satisfies this control, since a
+  correctly configured host may use either mechanism.
+applies_to: [linux_server]
+test_logic:
+  collector: rsyslog
+  operator: any_of
+  checks:
+    - check: "rsyslog_remote_target"
+      operator: not_equals
+      expected: null
+    - check: "journald_remote_target"
+      operator: not_equals
+      expected: null
+remediation: >
+  For rsyslog, add a forwarding action such as "*.* @@loghost.example.com:6514" to a
+  file under /etc/rsyslog.d/ and restart the service; the doubled @ selects TCP, which
+  should be paired with TLS via the gtls driver so that log contents are not exposed in
+  transit. For journald, install systemd-journal-remote and set the URL in
+  /etc/systemd/journal-upload.conf. Confirm delivery by generating a test message with
+  "logger" and locating it on the collector. Verify that the host firewall and any
+  network path permit the outbound connection, and that the collector is not itself
+  configured to accept unauthenticated input from arbitrary senders.
+scored: true

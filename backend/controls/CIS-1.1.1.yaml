@@ -1,0 +1,53 @@
+id: CIS-1.1.1
+title: Ensure unused filesystem kernel modules are disabled
+framework_mappings:
+  cis_linux_v8: "1.1.1"
+  nist_csf: "PR.IP-1"
+  soc2: "CC6.8"
+  cert_in_marker: "IMP"
+severity: low
+category: filesystem
+description: >
+  Verifies that filesystem drivers a general-purpose server has no reason to use are
+  prevented from loading. Every filesystem driver in the kernel is parsing code that
+  runs in kernel context against attacker-influenced data, and the drivers for obscure
+  or legacy formats receive far less scrutiny and fuzzing than the ones in daily use.
+  Because the kernel will autoload a module on first use, simply not using a filesystem
+  is not the same as it being unavailable; the module must be blocked explicitly. Each
+  module is checked for both an install override that redirects loading to /bin/true or
+  /bin/false and a blacklist entry, and confirmed not to be currently loaded.
+applies_to: [linux_server]
+test_logic:
+  collector: kernel_modules
+  operator: all_of
+  checks:
+    - check: "modules.cramfs.blocked"
+      operator: equals
+      expected: true
+    - check: "modules.freevxfs.blocked"
+      operator: equals
+      expected: true
+    - check: "modules.jffs2.blocked"
+      operator: equals
+      expected: true
+    - check: "modules.hfs.blocked"
+      operator: equals
+      expected: true
+    - check: "modules.hfsplus.blocked"
+      operator: equals
+      expected: true
+    - check: "modules.squashfs.blocked"
+      operator: equals
+      expected: true
+    - check: "modules.udf.blocked"
+      operator: equals
+      expected: true
+remediation: >
+  Create a file such as /etc/modprobe.d/cis-filesystems.conf containing, for each
+  module, both an "install <module> /bin/false" line and a "blacklist <module>" line.
+  The install line is the part that actually prevents autoloading; blacklist alone does
+  not stop a module being pulled in on demand. Unload any that are currently active with
+  "modprobe -r <module>". Check before blocking squashfs that the host does not depend
+  on it, as snap packages mount squashfs images and will break without it; where that
+  applies, exclude squashfs and record the dependency as the justification.
+scored: true

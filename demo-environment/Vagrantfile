@@ -1,0 +1,45 @@
+# Demo audit target for the Automated IT Systems Audit Tool.
+#
+# Provisions a deliberately misconfigured Ubuntu 22.04 host for the SSH collector to
+# audit. Per CLAUDE.md Section 1 the demo target is Vagrant + VirtualBox rather than a
+# container: the controls in this project inspect real OS-level configuration -- sshd,
+# PAM, sysctl, auditd, systemd units, mount options -- and a container's stripped-down
+# userspace and shared kernel cannot represent several of them honestly. A container
+# has no independent sysctl namespace for most of the parameters CIS-3.2.1 and
+# CIS-3.3.1 check, no real init system for the systemd unit states CIS-4.1.1 and
+# CIS-1.6.1 check, and no meaningful /tmp mount of its own for CIS-1.1.2.
+#
+# ############################################################################
+# #  WARNING -- THIS VM IS INTENTIONALLY INSECURE.                           #
+# #                                                                          #
+# #  provision.sh deliberately weakens this machine: root SSH login is       #
+# #  enabled, /etc/shadow is made world-readable, the firewall is disabled   #
+# #  and the password policy is gutted. That is the point -- it is the       #
+# #  audit tool's test subject.                                             #
+# #                                                                          #
+# #  Keep it on the host-only network defined below. Do not bridge it to a   #
+# #  real network, do not expose it to the internet, do not put real         #
+# #  credentials or data on it, and destroy it with "vagrant destroy" when   #
+# #  you are done demonstrating.                                            #
+# ############################################################################
+
+Vagrant.configure("2") do |config|
+  config.vm.box = "ubuntu/jammy64"
+  config.vm.hostname = "audit-demo-target"
+
+  # Host-only network. Deliberately not a bridged/public network -- see warning above.
+  config.vm.network "private_network", ip: "192.168.56.10"
+
+  config.vm.provider "virtualbox" do |vb|
+    vb.name = "audit-tool-demo-target"
+    vb.memory = 1024
+    vb.cpus = 1
+    # Guest additions / shared folders are not needed; the collector only uses SSH.
+  end
+
+  # Disable the default synced folder. The collector reads the VM over SSH; a shared
+  # folder would give the audited host a writable path back into the project.
+  config.vm.synced_folder ".", "/vagrant", disabled: true
+
+  config.vm.provision "shell", path: "provision.sh"
+end

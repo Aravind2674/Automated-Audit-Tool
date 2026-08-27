@@ -1,0 +1,41 @@
+id: CIS-3.1.1
+title: Ensure the host firewall applies a default-deny policy with explicit allow rules
+framework_mappings:
+  cis_linux_v8: "3.1.1"
+  nist_csf: "PR.AC-5"
+  soc2: "CC6.6"
+  cert_in_marker: "PRO"
+severity: critical
+category: network
+description: >
+  Verifies that a host firewall is installed, enabled at boot, and configured so that
+  inbound traffic is dropped unless a rule explicitly permits it. A default-allow posture
+  means every service that binds a socket is reachable from the network the moment it
+  starts, including services brought up incidentally by a package installation. A
+  default-deny base policy inverts that, so exposure becomes a deliberate act recorded
+  as a rule. The check accepts ufw, nftables or raw iptables as the enforcement point,
+  since a correctly configured host may use any of them, but requires that the active
+  one both be running and carry a deny or drop default for inbound traffic.
+applies_to: [linux_server]
+test_logic:
+  collector: firewall
+  operator: all_of
+  checks:
+    - check: "active_backend"
+      operator: not_equals
+      expected: "none"
+    - check: "enabled_at_boot"
+      operator: equals
+      expected: true
+    - check: "default_inbound_policy"
+      operator: in
+      expected: ["deny", "drop", "reject"]
+remediation: >
+  On Ubuntu the shortest path is ufw: set the base policy with "ufw default deny
+  incoming" and "ufw default allow outgoing", add an explicit rule for each service the
+  host must expose, and enable it with "ufw enable" so it is restored at boot. Add the
+  rule permitting your management SSH access before enabling the firewall, or the
+  enabling command will terminate your own session. If the host uses nftables or
+  iptables directly instead, set the input chain policy to drop and ensure the ruleset
+  is restored on boot by a persistence unit rather than only existing in memory.
+scored: true

@@ -1,0 +1,32 @@
+id: CIS-5.2.10
+title: Ensure SSH root login is disabled
+framework_mappings:
+  cis_linux_v8: "5.2.10"
+  nist_csf: "PR.AC-1"
+  soc2: "CC6.1"
+  cert_in_marker: "IMP"
+severity: high
+category: authentication
+description: >
+  Verifies that the SSH daemon refuses direct interactive login as the root account.
+  When root may log in over the network directly, every administrative action arrives
+  under a single shared identity, which destroys per-operator attribution and hands an
+  attacker a known, guaranteed-to-exist username to brute force. Administrators should
+  authenticate as themselves and then escalate, so that privileged activity is traceable
+  to a person. The effective daemon setting is read from the running sshd configuration
+  rather than the file alone, because Include directives and drop-in files can silently
+  override what the main config appears to say.
+applies_to: [linux_server]
+test_logic:
+  collector: ssh_config
+  check: "PermitRootLogin"
+  operator: equals
+  expected: "no"
+remediation: >
+  Edit /etc/ssh/sshd_config (or the drop-in file under /etc/ssh/sshd_config.d/ that
+  currently sets it) and set the directive to "PermitRootLogin no". Confirm no later
+  Include'd file re-enables it. Validate the change with "sshd -t" before restarting,
+  then apply it with "systemctl restart sshd". Ensure at least one non-root account
+  with sudo rights can log in before disconnecting your session, or you risk locking
+  yourself out of the host.
+scored: true

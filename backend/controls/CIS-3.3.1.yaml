@@ -1,0 +1,46 @@
+id: CIS-3.3.1
+title: Ensure ICMP redirect messages are not accepted
+framework_mappings:
+  cis_linux_v8: "3.3.1"
+  nist_csf: "PR.AC-5"
+  soc2: "CC6.6"
+  cert_in_marker: "PRO"
+severity: low
+category: network
+description: >
+  Verifies that the kernel ignores ICMP redirect messages, including those claiming to
+  come from a secure source. An accepted redirect rewrites the host's routing table on
+  the say-so of a message from the network, which an attacker positioned on the same
+  segment can forge in order to divert the host's traffic through a machine they control.
+  Both the running kernel values and the persisted sysctl files are collected so that a
+  setting present in one but not the other is visible rather than hidden.
+applies_to: [linux_server]
+test_logic:
+  collector: sysctl
+  operator: all_of
+  checks:
+    - check: "net.ipv4.conf.all.accept_redirects"
+      operator: equals
+      expected: 0
+    - check: "net.ipv4.conf.default.accept_redirects"
+      operator: equals
+      expected: 0
+    - check: "net.ipv4.conf.all.secure_redirects"
+      operator: equals
+      expected: 0
+    - check: "net.ipv4.conf.default.secure_redirects"
+      operator: equals
+      expected: 0
+    - check: "net.ipv6.conf.all.accept_redirects"
+      operator: equals
+      expected: 0
+    - check: "net.ipv6.conf.default.accept_redirects"
+      operator: equals
+      expected: 0
+remediation: >
+  Write the six parameters with a value of 0 into a file under /etc/sysctl.d/, then
+  apply them with "sysctl --system". Verify afterwards with "sysctl -a" that no
+  later-loading drop-in file resets them. Systems that rely on ICMP redirects for
+  routing are rare; if routing behaviour changes after applying this, the underlying
+  routing configuration is what needs correcting.
+scored: true

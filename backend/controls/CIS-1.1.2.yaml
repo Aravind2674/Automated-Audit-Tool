@@ -1,0 +1,37 @@
+id: CIS-1.1.2
+title: Ensure /tmp is a separate partition mounted with restrictive options
+framework_mappings:
+  cis_linux_v8: "1.1.2"
+  nist_csf: "PR.IP-1"
+  soc2: "CC6.8"
+  cert_in_marker: "IMP"
+severity: medium
+category: filesystem
+description: >
+  Verifies that /tmp is mounted as its own filesystem and carries the noexec, nosuid and
+  nodev options. /tmp is world-writable by design, which makes it the natural staging
+  ground for a payload dropped by an attacker who has gained limited code execution.
+  Mounting it noexec removes the ability to run a binary from that location directly,
+  nosuid neutralises any set-user-ID bit written there, and nodev prevents device nodes
+  being created. Giving it a separate filesystem additionally means that filling /tmp
+  cannot exhaust the root filesystem and halt the host.
+applies_to: [linux_server]
+test_logic:
+  collector: mounts
+  operator: all_of
+  checks:
+    - check: "/tmp.is_separate_partition"
+      operator: equals
+      expected: true
+    - check: "/tmp.options"
+      operator: superset_of
+      expected: ["noexec", "nosuid", "nodev"]
+remediation: >
+  On a systemd host the supported approach is to enable the shipped tmp.mount unit with
+  "systemctl unmask tmp.mount" followed by "systemctl --now enable tmp.mount", after
+  adding the three options to a drop-in override; this gives a tmpfs-backed /tmp. Where
+  a disk-backed /tmp is required, create the partition and add an /etc/fstab entry with
+  "defaults,rw,nosuid,nodev,noexec,relatime". Before applying noexec, check for
+  installers and package post-install scripts that extract to /tmp and execute from it,
+  since those will fail; several third-party installers do exactly this.
+scored: true

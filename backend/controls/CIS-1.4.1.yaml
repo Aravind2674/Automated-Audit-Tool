@@ -1,0 +1,39 @@
+id: CIS-1.4.1
+title: Ensure permissions on /etc/passwd are restricted to 644 and root ownership
+framework_mappings:
+  cis_linux_v8: "1.4.1"
+  nist_csf: "PR.AC-4"
+  soc2: "CC6.1"
+  cert_in_marker: "IMP"
+severity: high
+category: filesystem
+description: >
+  Verifies that /etc/passwd is owned by root and group root and that its permission bits
+  are no more permissive than 644. The file must remain world-readable because ordinary
+  processes resolve user names and IDs through it, but it must not be writable by anyone
+  other than root: an unprivileged user able to write it can change the UID field of an
+  account to 0, or insert an entirely new account, and obtain root that way. Both the
+  numeric mode and the owning user and group are checked, since correct bits on a file
+  owned by the wrong account provide no protection.
+applies_to: [linux_server]
+test_logic:
+  collector: file_permissions
+  operator: all_of
+  checks:
+    - check: "/etc/passwd.mode"
+      operator: mode_at_most
+      expected: "644"
+    - check: "/etc/passwd.owner"
+      operator: equals
+      expected: "root"
+    - check: "/etc/passwd.group"
+      operator: equals
+      expected: "root"
+remediation: >
+  Restore the expected state with "chown root:root /etc/passwd" and
+  "chmod 644 /etc/passwd". Do not tighten this file to 600: removing world-read breaks
+  name resolution for unprivileged processes across the system. If the permissions were
+  found loosened, treat that as a possible indicator of compromise rather than only a
+  misconfiguration, and review /etc/passwd for unexpected UID 0 entries and recently
+  added accounts before closing the finding.
+scored: true

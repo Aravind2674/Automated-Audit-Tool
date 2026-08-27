@@ -1,0 +1,30 @@
+id: CIS-5.3.2
+title: Ensure password expiration is set to 90 days or less
+framework_mappings:
+  cis_linux_v8: "5.3.2"
+  nist_csf: "PR.AC-1"
+  soc2: "CC6.1"
+  cert_in_marker: "IMP"
+severity: medium
+category: authentication
+description: >
+  Verifies that the system-wide default maximum password age is ninety days or fewer.
+  Bounding credential lifetime limits how long a password that has been quietly
+  compromised, shared or reused elsewhere remains a usable route into the host. The
+  default in /etc/login.defs governs accounts created after it is set; accounts that
+  already exist keep whatever aging values were written into /etc/shadow at creation
+  time, so per-account aging is collected alongside the default to expose that gap.
+applies_to: [linux_server]
+test_logic:
+  collector: login_defs
+  check: "PASS_MAX_DAYS"
+  operator: lte
+  expected: 90
+remediation: >
+  Set "PASS_MAX_DAYS 90" in /etc/login.defs. Because this default applies only to
+  newly created accounts, also correct existing interactive users individually with
+  "chage --maxdays 90 <username>". Review the collected per-account aging evidence to
+  identify accounts still carrying the 99999 never-expires value. Leave dedicated
+  service accounts that authenticate by key or token rather than password out of the
+  rotation, and record that decision as an exception rather than silently skipping them.
+scored: true

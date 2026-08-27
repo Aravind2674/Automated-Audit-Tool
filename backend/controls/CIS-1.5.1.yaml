@@ -1,0 +1,42 @@
+id: CIS-1.5.1
+title: Ensure core dumps are restricted
+framework_mappings:
+  cis_linux_v8: "1.5.1"
+  nist_csf: "PR.DS-5"
+  soc2: "CC6.7"
+  cert_in_marker: "IMP"
+severity: low
+category: hardening
+description: >
+  Verifies that processes cannot write core dumps and that set-user-ID programs in
+  particular are excluded from dumping. A core dump is a copy of a process's memory
+  written to disk, and for a service that handles credentials, keys or session tokens
+  that memory contains exactly those secrets in plaintext. Dumps from privileged
+  binaries are the sharpest case, since the memory belongs to a process running with
+  elevated rights but the resulting file may be readable more widely. The check covers
+  the resource limit, the kernel's suid_dumpable setting, and systemd-coredump's own
+  storage configuration, because systemd will capture dumps through its own path even
+  when the classic limit is zero.
+applies_to: [linux_server]
+test_logic:
+  collector: coredump
+  operator: all_of
+  checks:
+    - check: "hard_core_limit"
+      operator: equals
+      expected: 0
+    - check: "fs.suid_dumpable"
+      operator: equals
+      expected: 0
+    - check: "systemd_coredump_storage"
+      operator: in
+      expected: ["none", "not_installed"]
+remediation: >
+  Add "* hard core 0" to /etc/security/limits.conf or a file under
+  /etc/security/limits.d/, set "fs.suid_dumpable = 0" in a file under /etc/sysctl.d/ and
+  apply it with "sysctl --system". Where systemd-coredump is installed, additionally set
+  "Storage=none" and "ProcessSizeMax=0" in /etc/systemd/coredump.conf, otherwise dumps
+  continue to be collected by systemd regardless of the ulimit. Note the operational
+  cost: with dumps disabled a crashing service leaves no memory image to debug, so
+  arrange a controlled way to re-enable them temporarily on a host under investigation.
+scored: true

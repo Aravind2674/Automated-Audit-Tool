@@ -1,0 +1,39 @@
+id: CIS-4.1.1
+title: Ensure auditd is installed and enabled
+framework_mappings:
+  cis_linux_v8: "4.1.1"
+  nist_csf: "PR.PT-1"
+  soc2: "CC7.2"
+  cert_in_marker: "DET"
+severity: high
+category: logging
+description: >
+  Verifies that the Linux audit daemon is installed, running, and enabled to start at
+  boot. auditd is the kernel-level record of security-relevant events such as syscalls,
+  file access and authentication decisions, and it is the evidence source an incident
+  investigation depends on to establish what an account actually did. A host without it
+  can report that nothing suspicious was found only because nothing was ever recorded.
+  All three conditions are checked separately because a package that is installed but
+  masked, or running but not enabled at boot, leaves a gap that a simple presence check
+  would report as compliant.
+applies_to: [linux_server]
+test_logic:
+  collector: auditd
+  operator: all_of
+  checks:
+    - check: "installed"
+      operator: equals
+      expected: true
+    - check: "enabled_at_boot"
+      operator: equals
+      expected: true
+    - check: "active"
+      operator: equals
+      expected: true
+remediation: >
+  Install the daemon with "apt install auditd audispd-plugins", then enable and start it
+  with "systemctl --now enable auditd". If the unit reports as masked, unmask it first.
+  Where the audit rules must capture events occurring during early boot, additionally
+  add "audit=1" to the kernel command line in /etc/default/grub and regenerate the
+  bootloader configuration, otherwise events before the daemon starts are lost.
+scored: true

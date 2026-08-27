@@ -1,0 +1,18 @@
+# Normalise to LF in the repository.
+#
+# This is not cosmetic. demo-environment/provision.sh runs inside the Ubuntu VM: if
+# git checks it out with CRLF line endings on a Windows machine, Vagrant's shell
+# provisioner fails with "$'\r': command not found" and the demo VM never provisions
+# correctly. Same hazard for the Vagrantfile and any future .sh.
+* text=auto eol=lf
+
+*.sh      text eol=lf
+*.py      text eol=lf
+*.yaml    text eol=lf
+*.yml     text eol=lf
+*.md      text eol=lf
+Vagrantfile text eol=lf
+
+# Windows-only scripts must keep CRLF.
+*.bat     text eol=crlf
+*.ps1     text eol=crlf
