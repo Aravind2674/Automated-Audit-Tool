@@ -125,3 +125,156 @@ def classify_drift(rows: list[dict]) -> dict[str, list[dict]]:
             # regression in posture, but still a change worth surfacing.
             buckets["other"].append(row)
     return buckets
+
+
+# ---------------------------------------------------------------------------
+# Dashboard queries (Phase 6)
+#
+# Every figure the dashboard renders comes from one of these. They are read-only and
+# derive everything from the append-only results table -- there is no summary or
+# rollup table that could disagree with the evidence it summarises.
+#
+# Exception suppression is applied consistently with Phase 4: a finding covered by an
+# approved, unexpired exception is counted as accepted risk, never silently dropped.
+# `open + accepted == total failing` is a property the verification harness asserts.
+# ---------------------------------------------------------------------------
+
+#: Shared predicate for "an approved exception currently suppresses this finding".
+_ACTIVE_EXC = """
+    EXISTS (SELECT 1 FROM exceptions e
+             WHERE e.control_id  = res.control_id
+               AND e.resource_id = res.resource_id
+               AND e.approved_by IS NOT NULL
+               AND e.status IN ('accepted_risk','false_positive')
+               AND e.expiry_date > :as_of)
+"""
+
+DASHBOARD_SUMMARY_SQL = f"""
+SELECT
+    count(*)                                              AS total,
+    count(*) FILTER (WHERE res.outcome = 'pass')          AS passed,
+    count(*) FILTER (WHERE res.outcome = 'fail')          AS failed,
+    count(*) FILTER (WHERE res.outcome = 'error')         AS errored,
+    count(*) FILTER (WHERE res.outcome = 'manual_review') AS manual_review,
+    count(*) FILTER (WHERE res.outcome = 'fail' AND NOT {_ACTIVE_EXC})
+                                                          AS open_findings,
+    count(*) FILTER (WHERE res.outcome = 'fail' AND {_ACTIVE_EXC})
+                                                          AS accepted_risk,
+    round(
+        100.0 * count(*) FILTER (WHERE res.outcome = 'pass')
+        / NULLIF(count(*) FILTER (WHERE res.outcome IN ('pass','fail')), 0), 1
+    )                                                     AS compliance_pct
+FROM results res
+WHERE res.run_id = :run_id
+"""
+
+PER_DOMAIN_SQL = f"""
+SELECT
+    c.category,
+    count(*)                                              AS total,
+    count(*) FILTER (WHERE res.outcome = 'pass')          AS passed,
+    count(*) FILTER (WHERE res.outcome = 'fail')          AS failed,
+    count(*) FILTER (WHERE res.outcome = 'error')         AS errored,
+    count(*) FILTER (WHERE res.outcome = 'fail' AND NOT {_ACTIVE_EXC})
+                                                          AS open_findings,
+    round(
+        100.0 * count(*) FILTER (WHERE res.outcome = 'pass')
+        / NULLIF(count(*) FILTER (WHERE res.outcome IN ('pass','fail')), 0), 1
+    )                                                     AS compliance_pct
+FROM results res
+JOIN controls c ON c.id = res.control_id
+WHERE res.run_id = :run_id
+GROUP BY c.category
+ORDER BY c.category
+"""
+
+SEVERITY_BREAKDOWN_SQL = f"""
+SELECT c.severity,
+       count(*) FILTER (WHERE res.outcome = 'fail' AND NOT {_ACTIVE_EXC}) AS open_findings
+FROM results res
+JOIN controls c ON c.id = res.control_id
+WHERE res.run_id = :run_id
+GROUP BY c.severity
+"""
+
+OPEN_EXCEPTIONS_SQL = """
+SELECT e.exception_id, e.control_id, c.severity, c.title,
+       e.resource_id, e.status, e.requested_by, e.approved_by,
+       e.approval_date, e.expiry_date, e.justification, e.compensating_control,
+       (e.expiry_date <= :as_of) AS expired,
+       EXTRACT(DAY FROM (e.expiry_date - :as_of))::int AS days_until_expiry
+FROM exceptions e
+JOIN controls c ON c.id = e.control_id
+WHERE e.approved_by IS NOT NULL
+ORDER BY e.expiry_date
+"""
+
+#: Per-finding detail for the PDF export.
+#:
+#: `evidence` is selected verbatim. The report renders the stored JSONB as-is and does
+#: NOT re-run the check, re-derive the values, or paraphrase them into prose. A report
+#: that regenerates its own evidence is not evidence -- it is a second opinion that
+#: happens to agree, and it would silently diverge from the record the moment the host
+#: changed.
+FINDINGS_FOR_REPORT_SQL = f"""
+SELECT res.result_id, res.control_id, res.resource_id, res.outcome,
+       res.evidence, res.evaluated_at,
+       c.title, c.severity, c.category, c.remediation, c.framework_mappings,
+       {_ACTIVE_EXC} AS suppressed
+FROM results res
+JOIN controls c ON c.id = res.control_id
+WHERE res.run_id = :run_id
+ORDER BY
+    CASE res.outcome WHEN 'fail' THEN 0 WHEN 'error' THEN 1
+                     WHEN 'manual_review' THEN 2 ELSE 3 END,
+    CASE c.severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1
+                    WHEN 'medium' THEN 2 ELSE 3 END,
+    res.control_id, res.resource_id
+"""
+
+
+def _now_utc():
+    import datetime
+
+    return datetime.datetime.now(datetime.timezone.utc)
+
+
+def dashboard_summary(conn, run_id, as_of=None) -> dict:
+    row = conn.execute(
+        text(DASHBOARD_SUMMARY_SQL), {"run_id": run_id, "as_of": as_of or _now_utc()}
+    ).mappings().one()
+    return dict(row)
+
+
+def per_domain_breakdown(conn, run_id, as_of=None) -> list[dict]:
+    return [
+        dict(r)
+        for r in conn.execute(
+            text(PER_DOMAIN_SQL), {"run_id": run_id, "as_of": as_of or _now_utc()}
+        ).mappings()
+    ]
+
+
+def severity_breakdown(conn, run_id, as_of=None) -> dict:
+    rows = conn.execute(
+        text(SEVERITY_BREAKDOWN_SQL), {"run_id": run_id, "as_of": as_of or _now_utc()}
+    ).mappings()
+    return {r["severity"]: r["open_findings"] for r in rows}
+
+
+def open_exceptions(conn, as_of=None) -> list[dict]:
+    return [
+        dict(r)
+        for r in conn.execute(
+            text(OPEN_EXCEPTIONS_SQL), {"as_of": as_of or _now_utc()}
+        ).mappings()
+    ]
+
+
+def findings_for_report(conn, run_id, as_of=None) -> list[dict]:
+    return [
+        dict(r)
+        for r in conn.execute(
+            text(FINDINGS_FOR_REPORT_SQL), {"run_id": run_id, "as_of": as_of or _now_utc()}
+        ).mappings()
+    ]

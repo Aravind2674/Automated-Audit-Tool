@@ -733,6 +733,28 @@ open/accepted/total arithmetic.
 
 ---
 
+### ⚠️ TRACKED OPEN ITEM — Phase 5 real-AWS validation (logged exception)
+
+**2026-08-27.** The project owner granted an explicit, logged exception to proceed to
+Phase 6 while Phase 5 remains ⚠️ rather than ✅.
+
+**This does not close Phase 5.** Real AWS account validation moves from "blocks
+Phase 6/7" to "must close before final demo/submission". The requirement is unchanged
+and is restated here so it cannot be lost between phases:
+
+> Re-run the full Phase 5 verification against a real AWS test account containing
+> deliberately misconfigured resources — the cloud equivalent of the demo VM — and
+> reconcile the results against a hand-built answer key, exactly as
+> `EXPECTED_POSTURE.md` was reconciled for Linux. Until then the AWS findings are
+> mock-derived and are not trustworthy to the standard of the Linux findings.
+> See `architecture.md` §3.6 for the full gap analysis, including the moto root-user
+> limitation that leaves AWS-1.4 and AWS-1.5 each exercised in only one direction.
+
+Anything this tool reports about AWS before that validation must carry the caveat.
+The Phase 6 dashboard and PDF export therefore label AWS findings explicitly rather
+than presenting them alongside Linux findings as equally evidenced.
+
+
 ## Phase 5 — AWS collector
 
 **Date:** 2026-08-27
@@ -889,6 +911,161 @@ vice versa, so the two sets cannot drift into each other's namespace.
   Must close before Phase 7.
 - **Phase 5 is OPEN** pending real-account validation.
 - **Legacy-host reachability** (architecture.md 3.1) remains open.
+
+---
+
+## Phase 6 — Dashboard + report export
+
+**Date:** 2026-08-27
+**Status:** ✅ **COMPLETE — all acceptance criteria met with evidence.**
+
+### What was built
+
+- **`backend/api/main.py`** — read-only FastAPI app: `/api/health`, `/api/dashboard`,
+  `/api/findings`, `/api/reports/pdf`.
+- **Dashboard queries appended to `backend/queries.py`** — summary, per-domain,
+  per-severity, exceptions with expiry, per-finding report rows.
+- **`backend/reports/generator.py`** — reportlab PDF export, framework-mapped, with
+  verbatim per-finding evidence.
+- **`frontend/`** — Next.js 15 + React 19 + Tailwind dashboard
+  (`components/Dashboard.tsx`), including an inline-SVG compliance trend chart.
+- **`tests/verify_phase6.py`** — 38 checks.
+
+### Section 10 install record
+
+| Package | Version | Method | Result |
+|---|---|---|---|
+| Node.js LTS | 24.19.0 | **portable ZIP** from nodejs.org, SHA-256 verified against the published `SHASUMS256.txt`, extracted to `C:\Users\deepa\nodejs`, added to **user** PATH | ✅ |
+| npm | 11.17.0 | bundled with the above | ✅ |
+| fastapi / uvicorn / reportlab / pypdf / httpx | current | pip into `venv/` | ✅ |
+
+**`winget install OpenJS.NodeJS.LTS` failed** and is worth recording, because it is the
+obvious command and it does not work here:
+
+```
+The installer will request to run as administrator. Expect a prompt.
+You cancelled the installation.
+Installer failed with exit code: 1602
+```
+
+`1602` is "user cancelled". The Node MSI raises a UAC prompt that a non-interactive
+session cannot answer — unlike VirtualBox, Vagrant and PostgreSQL, whose elevation
+winget brokered itself. The official portable ZIP needs no elevation at all and was
+checksum-verified before use, which is the better path on a machine where an
+interactive UAC prompt may not be available.
+
+### Acceptance criterion 1 — dashboard shows overall %, per-domain, exceptions with expiry, drift chart ✅
+
+The dashboard was **rendered in a real browser** and its DOM read back, rather than
+assumed from the code:
+
+```
+OVERALL COMPLIANCE  16.7%   (3 passed of 18 scored)
+OPEN FINDINGS       14      (15 failing, 1 accepted risk)
+ACCEPTED RISK       1
+OPEN FINDINGS BY SEVERITY   Critical 1 · High 4 · Medium 7 · Low 2
+
+COMPLIANCE BY DOMAIN
+  access_control 1/1/0 100%      hardening 2/0/2 0%
+  authentication 5/0/5 0%        logging   3/0/3 0%
+  filesystem     4/1/3 25%       network   3/1/2 33.3%
+
+COMPLIANCE TREND (7 runs plotted)
+  16.7 · 16.7 · 27.8 · 16.7 · 16.7 · 16.7 · 16.7
+
+EXCEPTIONS
+  CIS-3.1.1  critical  aravind → priya  2026-08-27T15:42:10  expired — finding reopened
+  CIS-1.4.2  critical  aravind → priya  2026-09-03T15:39:51  active · 6d left
+```
+
+All four required elements are present. The exceptions table shows expiry dates *and*
+distinguishes an expired exception from an active one — the Phase 4 expiry behaviour
+surfaced in the UI rather than only in the database.
+
+### Acceptance criterion 2 — PDF includes per-finding evidence, mapped to CIS/NIST/SOC2/CERT-In ✅
+
+Every finding gets a framework mapping table and its evidence:
+
+```
+PASS  framework column 'CIS Linux v8' present
+PASS  framework column 'NIST CSF' present
+PASS  framework column 'SOC 2' present
+PASS  framework column 'CERT-In' present
+PASS  every finding's control_id appears in the PDF
+```
+
+The CIS column is labelled per control — `CIS Linux v8` for the Linux set,
+`CIS AWS v3` for the AWS set — rather than filing an AWS benchmark number under a
+Linux-labelled heading.
+
+### Rule 8 — dashboard figures cross-checked against direct DB queries
+
+Per the project owner's instruction, **every number is checked against the database,
+not against the API's own response.** The independent SQL is written in a different
+style from `backend/queries.py` — `CASE/SUM` aggregates and correlated subqueries
+instead of `FILTER` and `EXISTS` — so agreement means the figures are right rather
+than merely that one code path is deterministic.
+
+27 dashboard checks, all passing: total/passed/failed/errored/manual_review,
+open_findings, accepted_risk, `open + accepted == failed`, compliance % recomputed
+from raw counts, all six per-domain rows, per-severity counts (and that they sum to
+open_findings), the exception id set, each exception's `expired` flag and
+`expiry_date`, every trend row's pass/fail counts, and that the trend covers every
+completed run.
+
+Additionally, the values **rendered in the browser DOM** were compared against `psql`
+output directly — a third path that touches neither the API's SQL nor the harness's.
+All matched.
+
+### The PDF evidence rule — and proving the check has teeth
+
+`generator.py` renders `json.dumps(evidence)` of the `evidence` JSONB column exactly
+as stored. It does not re-run any check, re-derive any value, or paraphrase evidence
+into prose.
+
+This is not fussiness. A report that regenerates its own evidence is not evidence — it
+is a second opinion that happens to agree, and it diverges silently the moment the
+audited host changes. An auditor reading a three-month-old finding must see what was
+observed *then*.
+
+The harness extracts the evidence blocks from the rendered PDF, parses them back, and
+asserts a whitespace-normalised match against the JSONB read straight from PostgreSQL:
+
+```
+PASS  every finding's evidence JSON appears verbatim (18/18)
+PASS  a tampered evidence blob does NOT match the PDF (check has teeth)
+```
+
+That second check matters as much as the first. A substring assertion that always
+succeeds proves nothing, so the harness deliberately mutates one evidence blob and
+confirms the altered version is **not** found in the PDF. Without it, the verbatim
+check could be silently vacuous.
+
+### AWS caveat surfaced in the product, not just the docs
+
+Both the dashboard and the PDF carry the Phase 5 caveat: AWS findings are labelled by
+provider and accompanied by a notice that they are moto-derived and not evidenced to
+the standard of the Linux findings. A compliance report that presented the two side by
+side as equally evidenced would misrepresent both.
+
+### Deviations and open items
+
+- **No authentication.** Spec Section 1 allows session-based auth for the MVP, and
+  Phase 6's acceptance criteria concern the dashboard and export only, so none was
+  built. **The API must not be exposed beyond localhost until it exists.** CORS is
+  restricted to `localhost:3000` and every endpoint is read-only, but that is a
+  mitigation, not a substitute. Carried as an open item.
+- **`backend/api/main.py`, `tests/verify_phase6.py`** are new; `/api` and
+  `/reports/generator.py` are in the Section 2 tree.
+- **`audit_log` records no `report_exported` event yet.** Section 3 lists that event
+  type and Phase 7's acceptance requires report export to be audited. Deliberately
+  left for Phase 7, where the audit-log sweep belongs, rather than half-wired here.
+- **Screenshot not captured** — the browser pane is not displayable in this session.
+  The rendered DOM text was extracted and verified instead, which is stronger evidence
+  than an image since it is the actual rendered content.
+- **Credentials still not behind `secrets_manager`** (Section 6). Must close before
+  Phase 7.
+- **Phase 5 real-AWS validation** remains a tracked open item.
 
 ### Addendum 3 — 2026-08-27, source control and collaboration setup
 

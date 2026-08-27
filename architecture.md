@@ -504,7 +504,9 @@ Every deviation, with reasoning. Full detail in `BUILD_LOG.md`.
 | 4 | Excluded from open findings, visible in accepted risk | ✅ verified (15 failing → 14 open + 1 accepted; suppressed row still stored as `fail`) |
 | 4 | Returns to `fail` after `expiry_date` on a subsequent run | ✅ verified with a real 120s expiry, real clock and a real scan (13+2 → 14+1) |
 | 5 | Same correctness bar as Phase 2, for the 6 AWS controls | ⚠️ **verified against moto only — NOT to the Phase 1–4 standard.** All checks pass across two independently written fixture scenarios, but every result came from a mock. **Open until re-validated against a real AWS account — see §3.6.** |
-| 6–7 | — | not started |
+| 6 | Dashboard: overall %, per-domain, exceptions with expiry, drift chart | ✅ verified (rendered in a real browser, DOM read back; 27 figures cross-checked against direct SQL written in a different style from the API's) |
+| 6 | PDF export: per-finding evidence, mapped to CIS/NIST/SOC2/CERT-In | ✅ verified (18/18 evidence blobs byte-match the stored JSONB; a tampered blob correctly fails, proving the check is not vacuous) |
+| 7 | — | not started |
 
 No criterion in this table is marked verified without corresponding evidence recorded
 in `BUILD_LOG.md`.

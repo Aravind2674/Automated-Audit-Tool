@@ -18,7 +18,8 @@ anything — it defines the phase order, the schemas, and the rules the code fol
 | 3 — Historical results + drift | ✅ complete, verified |
 | 4 — Exception workflow | ✅ complete, verified |
 | 5 — AWS collector | ⚠️ code complete, **moto-mocked only** — open pending real-account validation |
-| 6–7 | not started |
+| 6 — Dashboard + report export | ✅ complete, verified |
+| 7 | not started |
 
 Latest scan of the demo VM: **3 pass, 15 fail, 16.7% compliance**, every verdict
 independently confirmed on the host.
@@ -293,6 +294,48 @@ Phase 5 — AWS collector against moto. Needs no VM, no database and no AWS acco
 > ⚠️ Phase 5 is verified against a **mock**, not real AWS. Its findings are not
 > trustworthy to the standard of the Linux controls until re-run against a real AWS
 > test account — see `architecture.md` §3.6.
+
+Phase 6 — dashboard figures cross-checked against direct SQL, and PDF evidence checked
+byte-for-byte against the stored JSONB. Needs the database:
+
+```bash
+./venv/Scripts/python.exe tests/verify_phase6.py
+```
+
+---
+
+## 6. Run the dashboard
+
+Start the API (terminal 1):
+
+```bash
+./venv/Scripts/python.exe -m uvicorn api.main:app --host 127.0.0.1 --port 8000 --app-dir backend
+```
+
+Start the frontend (terminal 2):
+
+```bash
+cd frontend && npm install && npm run dev
+```
+
+Then open http://localhost:3000.
+
+> ⚠️ **The API has no authentication yet.** CORS is restricted to `localhost:3000` and
+> every endpoint is read-only, but do not expose this beyond localhost until
+> session auth is built.
+
+Export a PDF report directly:
+
+```bash
+curl -o audit-report.pdf http://127.0.0.1:8000/api/reports/pdf
+```
+
+### Node.js note
+
+`winget install OpenJS.NodeJS.LTS` raises a UAC prompt that a non-interactive shell
+cannot answer (installer exit `1602`). If that happens, use the official portable ZIP
+from nodejs.org, verify it against the published `SHASUMS256.txt`, extract it, and add
+the folder to your user PATH — no elevation required.
 
 ---
 
