@@ -396,7 +396,7 @@ Every deviation, with reasoning. Full detail in `BUILD_LOG.md`.
 | 1 | 18 control YAMLs load, 0 schema errors | ✅ verified (12/12 negative tests rejected) |
 | 1 | Collector returns real raw output from the VM | ✅ verified (14/14 sources, 66/66 commands; 7/7 rule-8 cross-check) |
 | 2 | Correct pass/fail for all 18 controls vs the VM's actual config | ✅ verified (0 mismatches; 18/18 rule-8 cross-check) |
-| 2 | Every run writes a `runs` row and per-control `results` rows | ⏳ pending live PostgreSQL verification |
+| 2 | Every run writes a `runs` row and per-control `results` rows | ✅ verified against live PostgreSQL 17.11 (1 run, 18 results, 20 audit_log rows sharing one correlation_id; 18/18 rule-8 cross-check of persisted rows vs fresh on-host derivation) |
 | 3–7 | — | not started |
 
 No criterion in this table is marked verified without corresponding evidence recorded

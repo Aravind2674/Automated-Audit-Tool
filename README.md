@@ -13,17 +13,17 @@ anything — it defines the phase order, the schemas, and the rules the code fol
 
 | Phase | State |
 |---|---|
-| 1 — Control library + SSH collector (raw output) | **in progress** |
-| 2 — Normalizer + evaluator | not started |
-| 3–7 | not started |
+| 1 — Control library + SSH collector (raw output) | ✅ complete, verified |
+| 2 — Normalizer + evaluator + persistence | ✅ complete, verified |
+| 3 — Historical results + drift | not started |
+| 4–7 | not started |
 
-Phase 1 acceptance criteria (spec Section 7):
+Latest scan of the demo VM: **3 pass, 15 fail, 16.7% compliance**, every verdict
+independently confirmed on the host.
 
-- ✅ All 18 control YAMLs load with zero schema errors.
-- ⏳ Collector returns real raw output from the demo VM — **not yet verified.**
-
-See `BUILD_LOG.md` for what has been verified, how, and every deviation from spec.
-Do not treat a phase as done because code for it exists; check `BUILD_LOG.md`.
+See `BUILD_LOG.md` for what has been verified and how, and `architecture.md` for
+design rationale and known limitations. Do not treat a phase as done because code for
+it exists; check `BUILD_LOG.md`.
 
 ---
 
@@ -32,8 +32,7 @@ Do not treat a phase as done because code for it exists; check `BUILD_LOG.md`.
 Python 3.11+, VirtualBox, and Vagrant. **No Docker and no WSL** — the demo audit
 target is a real VM (spec Section 1).
 
-PostgreSQL is needed from Phase 2 onward; Node.js from Phase 6. Neither is needed to
-run Phase 1.
+PostgreSQL is needed from Phase 2 onward. Node.js is not needed until Phase 6.
 
 ### Windows (verified on Windows 11, this is what the project was built on)
 
@@ -44,6 +43,13 @@ winget install --id Oracle.VirtualBox -e --accept-package-agreements --accept-so
 ```bash
 winget install --id Hashicorp.Vagrant -e --accept-package-agreements --accept-source-agreements
 ```
+
+```bash
+winget install --id PostgreSQL.PostgreSQL.17 -e --accept-package-agreements --accept-source-agreements --custom "--mode unattended --unattendedmodeui none --superpassword CHANGE_ME --serverport 5432"
+```
+
+If the PostgreSQL download fails with HTTP 403, that is EnterpriseDB rate-limiting and
+is transient — wait a few minutes and re-run the same command.
 
 The VirtualBox winget package does **not** add `VBoxManage` to `PATH`. Add it once,
 then open a new terminal:
@@ -71,7 +77,7 @@ sudo apt-get install -y virtualbox vagrant python3-venv
 ### Verify before continuing
 
 ```bash
-vagrant --version && VBoxManage --version
+vagrant --version && VBoxManage --version && psql --version
 ```
 
 ---
@@ -101,8 +107,8 @@ python3 -m venv venv && ./venv/bin/python -m pip install -r requirements.txt
 Every command below uses `./venv/Scripts/python.exe` (Windows). On macOS/Linux
 substitute `./venv/bin/python`.
 
-Copy the environment template. `SECRETS_KEY` is not used until Phase 2, but create the
-file now so it is never an afterthought:
+Copy the environment template. `SECRETS_KEY` is not consumed until `secrets_manager`
+lands in a later phase, but create the file now so it is never an afterthought:
 
 ```bash
 cp .env.example .env
@@ -140,8 +146,8 @@ cd demo-environment && vagrant status
 ```
 
 `demo-environment/EXPECTED_POSTURE.md` is the per-control answer key for this VM —
-4 controls configured to pass, 14 to fail. Phase 2's evaluator output is verified by
-hand against that table.
+**3 pass, 15 fail**. Phase 2's evaluator output is verified by hand against that
+table, and all 18 rows are confirmed against the live VM.
 
 Useful lifecycle commands:
 
@@ -164,8 +170,60 @@ Prints raw output for all 18 controls grouped by control, and writes
 ./venv/Scripts/python.exe backend/phase1_collect.py --from-vagrant-ssh-config
 ```
 
-`phase1_raw_output.json` is gitignored — it contains a full configuration map of an
-audited host. Regenerate it locally rather than sharing it.
+`phase1_raw_output.json` **is** committed — spec Section 11 treats small evidence
+artifacts as part of the audit trail this project exists to produce. Note that it
+contains a full configuration map of whatever host was audited; harmless for the
+throwaway demo VM, but think before committing one collected from a real server.
+
+---
+
+## 4b. Create the database
+
+Create the application role and database (replace `CHANGE_ME` with the superuser
+password you set during install, and pick your own app password):
+
+```bash
+psql -U postgres -h localhost -c "CREATE ROLE audit LOGIN PASSWORD 'your-app-password';" -c "CREATE DATABASE audit_tool OWNER audit;"
+```
+
+Put the matching URL in `.env` — the app reads it from there and never from a
+hardcoded string:
+
+```bash
+echo 'DATABASE_URL=postgresql+psycopg://audit:your-app-password@localhost:5432/audit_tool' >> .env
+```
+
+Tables are created automatically on the first scan.
+
+---
+
+## 4c. Run a full scan (Phase 2)
+
+Collect from the VM, normalize, evaluate all 18 controls, and persist a `runs` row,
+18 `results` rows and the `audit_log` trail:
+
+```bash
+./venv/Scripts/python.exe backend/run_scan.py --from-vagrant-ssh-config --triggered-by "$USER"
+```
+
+Re-evaluate cached raw output without touching the VM:
+
+```bash
+./venv/Scripts/python.exe backend/run_scan.py --raw phase1_raw_output.json
+```
+
+Evaluate without a database at all:
+
+```bash
+./venv/Scripts/python.exe backend/run_scan.py --raw phase1_raw_output.json --no-db
+```
+
+Inspect the current compliance posture — always computed as "results from the latest
+completed run", never a mutable current-state table:
+
+```bash
+psql -U audit -h localhost -d audit_tool -c "SELECT r.control_id, c.severity, r.outcome FROM results r JOIN controls c ON c.id=r.control_id WHERE r.run_id=(SELECT run_id FROM runs WHERE status='completed' ORDER BY completed_at DESC LIMIT 1) ORDER BY r.outcome, r.control_id;"
+```
 
 ---
 
@@ -178,12 +236,20 @@ needed:
 ./venv/Scripts/python.exe tests/test_control_library.py
 ```
 
-Independent cross-check of collector output (spec Section 9 rule 8) — re-runs each
-check over a **fresh** SSH connection and diffs against what the collector recorded.
-Requires the VM to be running:
+Independent cross-checks (spec Section 9 rule 8). Both require the VM to be running.
+
+Phase 1 — re-runs each check over a **fresh** SSH connection and diffs bytes against
+what the collector recorded:
 
 ```bash
 ./venv/Scripts/python.exe tests/crosscheck_phase1.py --from-vagrant-ssh-config
+```
+
+Phase 2 — re-derives all 18 verdicts on the host using commands formulated
+independently of the collector's, and compares against the evaluator:
+
+```bash
+./venv/Scripts/python.exe tests/crosscheck_phase2.py --from-vagrant-ssh-config
 ```
 
 ---

@@ -181,13 +181,39 @@ is the usual failure mode there.
 Host capability confirmed before provisioning: 8 processor cores, 15674 MB RAM,
 81.7 GB free on C:.
 
+**Addendum 2b — PostgreSQL, installed 2026-08-27 (Section 10 install record).**
+
+| Package | Version | Source | Method | Exit |
+|---|---|---|---|---|
+| PostgreSQL | 17.11-1 | `PostgreSQL.PostgreSQL.17` (winget) — EDB installer, hash verified by winget | `winget install -e --disable-interactivity --custom '--mode unattended --unattendedmodeui none --superpassword <redacted> --serverport 5432'` | 0 |
+
+No reboot required. Service `postgresql-x64-17` registered, `Running`, StartType
+`Automatic`; `initdb` completed (PG_VERSION 17); listening on 5432.
+
+Two obstacles worth recording, since both cost real time and would recur on a rebuild:
+
+1. **The host slept mid-install**, killing the first winget attempt and leaving an
+   orphaned `winget` process holding the install. It was terminated and the install
+   restarted cleanly.
+2. **EnterpriseDB returned HTTP 403** on the installer download for a stretch —
+   every version, every endpoint, and unchanged by user-agent. It was transient:
+   a later request returned HTTP 200 and downloaded at ~2.5 MB/s. If a rebuild hits
+   403 here, wait and retry rather than hunting for an alternative mirror.
+
+Application role and database were created as `audit` / `audit_tool` with a randomly
+generated password written only to `.env` (gitignored, verified with
+`git check-ignore`). The PostgreSQL superuser password is a local development value
+and is not used by the application.
+
 ---
 
 ## Phase 2 — Normalizer + evaluation engine, Linux controls only
 
 **Date:** 2026-08-27
-**Status:** see the acceptance section below — evaluation correctness is met and
-independently verified; database persistence is pending PostgreSQL finishing install.
+**Status:** ✅ **COMPLETE — both acceptance criteria met with evidence.**
+Correct pass/fail for all 18 controls: met, 0 mismatches, 18/18 rule-8 cross-check.
+Every run writes a `runs` row and per-control `results` rows: met against live
+PostgreSQL 17.11.
 
 ### What was built
 
@@ -301,12 +327,56 @@ not read the host" → **error**. Collapsing them would let a missing sudo right
 as a tidy list of compliance failures, which is worse than crashing because it looks
 credible.
 
-**2. Every run writes a `runs` row and per-control `results` rows.**
-⏳ **Not yet verified.** Code is complete and the orchestrator runs end-to-end without
-a database (18 results, 19 audit rows). PostgreSQL was blocked for part of this
-session by an EnterpriseDB HTTP 403 on the installer download — transient, later
-returning HTTP 200 — and the install was still in progress at the time of writing.
-**This criterion must be confirmed against a live database before Phase 3 starts.**
+**2. Every run writes a `runs` row and per-control `results` rows.** ✅ Met.
+
+Live scan against the demo VM, persisted to PostgreSQL 17.11:
+
+```
+run_id         : c4b93ee3-6932-47bd-8815-a156d0fedd76
+correlation_id : ad5c2505-4780-48b6-b666-14cff77bbb66
+results        : 18
+outcomes       : {'fail': 15, 'pass': 3}
+compliance     : 3/18 = 16.7%
+```
+
+Queried back with `psql` directly — an independent path, not through the app's ORM:
+
+```
+     t     | count            event_type     | count | distinct_corr_ids
+-----------+-------          -------------------+-------+-------------------
+ audit_log |    20            control_evaluated |    18 |                 1
+ controls  |    18            scan_completed    |     1 |                 1
+ results   |    18            scan_started      |     1 |                 1
+ runs      |     1
+```
+
+One `runs` row (status `completed`, `started_at`/`completed_at` populated), 18
+`results` rows one per control, 20 `audit_log` rows all sharing a single
+`correlation_id` for the run. `evidence` JSONB stores per-check detail — for CIS-1.4.2
+it records `/etc/shadow.mode actual "644" expected "640" mode_at_most satisfied:false`
+alongside the two checks that did pass, so the finding is defensible later without
+re-running the scan.
+
+**Rule 8 on the persisted data.** Outcomes were read back **out of PostgreSQL** and
+compared against a fresh on-host derivation over a new SSH connection — verifying the
+stored rows, not an in-memory evaluation:
+
+```
+outcomes read from PostgreSQL: 18
+cross-checked : 18 controls (DB rows vs fresh on-host derivation)
+matched       : 18     mismatched : 0
+```
+
+**Append-only enforcement verified:**
+
+```
+grep for UPDATE/DELETE against results or audit_log  -> none found
+AuditSink public API                                 -> ['event', 'write']
+hardcoded secrets grep                               -> none found
+```
+
+`AuditSink` exposes no update or delete method, so the append-only rule is enforced by
+the absence of an API rather than by everyone remembering it.
 
 ### Deviations and open items
 
