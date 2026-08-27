@@ -24,6 +24,7 @@ from __future__ import annotations
 import datetime
 import io
 import json
+import os
 import pathlib
 import re
 import sys
@@ -39,6 +40,27 @@ from api.main import app  # noqa: E402
 from db import get_engine  # noqa: E402
 from queries import latest_completed_run  # noqa: E402
 from reports.generator import build_report  # noqa: E402
+
+# Phase 7 added session auth, so this harness must now authenticate like any other
+# caller. It deliberately logs in through the real /api/auth/login endpoint rather
+# than bypassing the dependency -- a test that disables auth to reach the thing it is
+# testing stops verifying the deployed configuration.
+AUTH_USER = os.environ.get("AUDIT_USER", "aravind")
+AUTH_PASSWORD = os.environ.get("AUDIT_PASSWORD", "demo-only-password-2026")
+
+
+def _authed_client() -> TestClient:
+    client = TestClient(app)
+    resp = client.post("/api/auth/login",
+                       json={"username": AUTH_USER, "password": AUTH_PASSWORD})
+    if resp.status_code != 200:
+        raise SystemExit(
+            f"cannot authenticate as {AUTH_USER!r} (HTTP {resp.status_code}). "
+            f"Create the user first:  AUDIT_PASSWORD=... python backend/bootstrap.py "
+            f"create-user {AUTH_USER}"
+        )
+    return client
+
 
 _failures: list[str] = []
 
@@ -118,7 +140,7 @@ FROM exceptions WHERE approved_by IS NOT NULL
 
 def test_dashboard_numbers() -> None:
     print("\n=== Dashboard figures vs direct DB queries (not the API's own SQL) ===\n")
-    client = TestClient(app)
+    client = _authed_client()
     resp = client.get("/api/dashboard")
     check("GET /api/dashboard returns 200", resp.status_code == 200, str(resp.status_code))
     if resp.status_code != 200:
@@ -268,7 +290,7 @@ def test_pdf_evidence_is_verbatim() -> None:
 
 def test_report_endpoint() -> None:
     print("\n=== PDF export endpoint ===\n")
-    client = TestClient(app)
+    client = _authed_client()
     resp = client.get("/api/reports/pdf")
     check("GET /api/reports/pdf returns 200", resp.status_code == 200, str(resp.status_code))
     check("content-type is application/pdf",

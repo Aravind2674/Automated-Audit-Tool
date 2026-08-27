@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 
+import Login from "./Login";
+
 /**
  * Every figure rendered here comes straight from /api/dashboard, which derives it
  * from the append-only `results` table. Nothing is recomputed client-side -- if the
@@ -41,6 +43,7 @@ type Payload = {
   run_id: string; generated_at: string; summary: Summary;
   per_domain: Domain[]; open_findings_by_severity: Record<string, number>;
   exceptions: Exc[]; trend: TrendRow[]; drift_since_previous_run: DriftRow[];
+  viewer: string;
 };
 
 const SEV_COLOR: Record<string, string> = {
@@ -104,14 +107,33 @@ function DriftChart({ trend }: { trend: TrendRow[] }) {
 export default function Dashboard() {
   const [data, setData] = useState<Payload | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [needsLogin, setNeedsLogin] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
-    fetch(`${API}/api/dashboard`)
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
-      .then(setData)
+    // credentials:"include" sends the HttpOnly session cookie. Without it the API
+    // correctly returns 401 -- the cookie is not attached to cross-origin requests
+    // by default, which is also what makes SameSite meaningful.
+    fetch(`${API}/api/dashboard`, { credentials: "include" })
+      .then((r) => {
+        if (r.status === 401) {
+          setNeedsLogin(true);
+          return null;
+        }
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json();
+      })
+      .then((d) => { if (d) { setData(d); setNeedsLogin(false); } })
       .catch((e) => setError(String(e)));
-  }, []);
+  }, [reloadKey]);
 
+  async function logout() {
+    await fetch(`${API}/api/auth/logout`, { method: "POST", credentials: "include" });
+    setData(null);
+    setNeedsLogin(true);
+  }
+
+  if (needsLogin) return <Login onSuccess={() => { setNeedsLogin(false); setReloadKey((k) => k + 1); }} />;
   if (error) return <main className="p-8"><p className="text-red-700">Failed to load: {error}</p></main>;
   if (!data) return <main className="p-8"><p className="text-slate-500">Loading…</p></main>;
 
@@ -127,10 +149,19 @@ export default function Dashboard() {
             Run <span className="font-mono">{data.run_id}</span> · latest completed scan
           </p>
         </div>
-        <a href={`${API}/api/reports/pdf`}
-           className="rounded-md bg-slate-800 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700">
-          Export PDF report
-        </a>
+        <div className="flex items-center gap-3">
+          <span className="text-xs text-slate-500">
+            signed in as <span className="font-medium">{data.viewer}</span>
+          </span>
+          <a href={`${API}/api/reports/pdf`}
+             className="rounded-md bg-slate-800 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700">
+            Export PDF report
+          </a>
+          <button onClick={logout}
+                  className="rounded-md px-3 py-2 text-sm text-slate-600 ring-1 ring-slate-300 hover:bg-slate-50">
+            Sign out
+          </button>
+        </div>
       </header>
 
       <section className="grid grid-cols-2 gap-4 md:grid-cols-4">

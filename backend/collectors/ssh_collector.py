@@ -204,26 +204,100 @@ class SSHCollector(Collector):
 
     collector_type = "ssh"
 
-    def __init__(self, command_timeout: int = 30, connect_timeout: int = 15) -> None:
+    def __init__(
+        self,
+        command_timeout: int = 30,
+        connect_timeout: int = 15,
+        db_session=None,
+        actor: str = "system",
+        correlation_id=None,
+        run_id=None,
+    ) -> None:
         self.command_timeout = command_timeout
         self.connect_timeout = connect_timeout
+        #: When supplied, credentials are resolved through secrets_manager and every
+        #: use is audited (spec Section 6). See _connect for the bootstrap fallback.
+        self.db_session = db_session
+        self.actor = actor
+        self.correlation_id = correlation_id
+        self.run_id = run_id
+        self._target_id = "unknown"
 
     # -- connection ---------------------------------------------------------------
+
+    def _load_key(self, material: str):
+        """Parse PEM/OpenSSH private key material into a paramiko key object.
+
+        The key type is not known in advance, so each supported type is tried in turn.
+        The material comes from secrets_manager in memory and is never written to
+        disk — writing it to a temp file to satisfy `key_filename` would leave
+        plaintext key material on the filesystem, which is the entire thing the
+        encrypted store exists to avoid.
+        """
+        import io as _io
+
+        import paramiko
+
+        # Resolved by name rather than referenced directly: Paramiko 5.0.0 removed
+        # DSSKey outright (DSA is obsolete), so naming it unconditionally raises
+        # AttributeError at import time on current Paramiko and would break every
+        # connection, including RSA ones that never needed it.
+        candidates = [
+            getattr(paramiko, name, None)
+            for name in ("Ed25519Key", "RSAKey", "ECDSAKey", "DSSKey")
+        ]
+
+        last_error = None
+        for key_class in [k for k in candidates if k is not None]:
+            try:
+                return key_class.from_private_key(_io.StringIO(material))
+            except Exception as exc:  # noqa: BLE001 -- try the next key type
+                last_error = exc
+        raise CollectorError(
+            f"stored credential for {self._target_id!r} is not a usable private key: "
+            f"{type(last_error).__name__}"
+        )
 
     def _connect(self, target: dict) -> Connection:
         """Open a Fabric connection to the target.
 
-        TODO (Phase 2+, spec Section 6): credentials are currently read from the
-        target dict. They must move behind secrets_manager.get_credential(target_id)
-        so that the Fernet-encrypted store is the only source and every use writes an
-        audit_log row with event_type='credential_used'. secrets_manager and the
-        database do not exist yet at Phase 1, so this is deferred, not skipped.
+        Spec Section 6: credentials come from `secrets_manager.get_credential()`. This
+        module never reads the credentials table, never holds a Fernet key, and never
+        sees ciphertext — it receives plaintext key material and uses it in memory.
+        Every call writes a `credential_used` audit row carrying the target_id and
+        never the credential.
+
+        `db_session` is required for that path. When it is absent the collector falls
+        back to an explicit key path in the target dict, which exists ONLY for the
+        Phase 1 bootstrap case (reading `vagrant ssh-config` before any credential has
+        been stored). That fallback is refused whenever a session IS available, so it
+        cannot silently become the normal path again.
         """
+        self._target_id = target["target_id"]
         connect_kwargs: dict = {}
-        if target.get("key_filename"):
+
+        if self.db_session is not None:
+            import secrets_manager
+
+            material = secrets_manager.get_credential(
+                self.db_session,
+                target["target_id"],
+                actor=self.actor,
+                correlation_id=self.correlation_id,
+                run_id=self.run_id,
+            )
+            self.db_session.commit()  # the credential_used row must persist
+            connect_kwargs["pkey"] = self._load_key(material)
+        elif target.get("key_filename"):
             connect_kwargs["key_filename"] = target["key_filename"]
-        if target.get("password"):
+        elif target.get("password"):
             connect_kwargs["password"] = target["password"]
+        else:
+            raise CollectorError(
+                f"no credential available for {target['target_id']!r}: pass a "
+                f"db_session so secrets_manager can supply it, or a key_filename for "
+                f"the bootstrap path"
+            )
 
         return Connection(
             host=target["host"],

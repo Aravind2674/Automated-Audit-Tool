@@ -19,7 +19,7 @@ anything — it defines the phase order, the schemas, and the rules the code fol
 | 4 — Exception workflow | ✅ complete, verified |
 | 5 — AWS collector | ⚠️ code complete, **moto-mocked only** — open pending real-account validation |
 | 6 — Dashboard + report export | ✅ complete, verified |
-| 7 | not started |
+| 7 — Audit log + session auth + security review | ✅ complete, verified |
 
 Latest scan of the demo VM: **3 pass, 15 fail, 16.7% compliance**, every verdict
 independently confirmed on the host.
@@ -302,6 +302,13 @@ byte-for-byte against the stored JSONB. Needs the database:
 ./venv/Scripts/python.exe tests/verify_phase6.py
 ```
 
+Phase 7 — auth enforcement over real HTTP, secrets_manager, audit sweep, secrets grep.
+**Requires the API to be running** (it makes real unauthenticated requests to it):
+
+```bash
+./venv/Scripts/python.exe tests/verify_phase7.py
+```
+
 ---
 
 ## 6. Run the dashboard
@@ -320,14 +327,42 @@ cd frontend && npm install && npm run dev
 
 Then open http://localhost:3000.
 
-> ⚠️ **The API has no authentication yet.** CORS is restricted to `localhost:3000` and
-> every endpoint is read-only, but do not expose this beyond localhost until
-> session auth is built.
-
-Export a PDF report directly:
+### First-time setup: create a user and store the target credential
 
 ```bash
-curl -o audit-report.pdf http://127.0.0.1:8000/api/reports/pdf
+AUDIT_PASSWORD='choose-a-strong-password' ./venv/Scripts/python.exe backend/bootstrap.py create-user aravind --role admin
+```
+
+Store the demo VM'''s SSH key, encrypted with your `SECRETS_KEY`:
+
+```bash
+./venv/Scripts/python.exe backend/bootstrap.py store-vagrant-key
+```
+
+Separation of duties needs a second identity for approving high/critical exceptions:
+
+```bash
+AUDIT_PASSWORD='a-different-strong-password' ./venv/Scripts/python.exe backend/bootstrap.py create-user priya --role approver
+```
+
+> ⚠️ **The session cookie is set with `secure=False`** because the demo runs over plain
+> HTTP on localhost. **Set it to `True` before deploying behind TLS** — a session cookie
+> without the Secure flag can be sent over an unencrypted connection.
+
+Export a PDF report (requires a session cookie):
+
+```bash
+curl -c /tmp/jar -X POST -H 'Content-Type: application/json' -d '{"username":"aravind","password":"..."}' http://127.0.0.1:8000/api/auth/login
+```
+
+```bash
+curl -b /tmp/jar -o audit-report.pdf http://127.0.0.1:8000/api/reports/pdf
+```
+
+Trigger a scan from the API (`live` collects over SSH; `cached` re-evaluates stored raw output):
+
+```bash
+curl -b /tmp/jar -X POST -H 'Content-Type: application/json' -d '{"mode":"live"}' http://127.0.0.1:8000/api/scans
 ```
 
 ### Node.js note

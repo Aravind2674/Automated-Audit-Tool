@@ -70,6 +70,116 @@ def persist_controls(session, controls: list[dict]) -> None:
             existing.remediation = control["remediation"]
 
 
+def execute_scan(mode: str = "cached", triggered_by: str = "api",
+                 raw_path: str | None = None) -> dict:
+    """Run a scan and persist it. Used by the API's POST /api/scans endpoint.
+
+    mode="cached"  re-evaluate the stored raw collection (fast, deterministic)
+    mode="live"    collect from the demo VM over SSH first, with credentials
+                   resolved through secrets_manager
+
+    Returns a summary dict. Every path writes a `runs` row, per-control `results`
+    rows and the audit trail, all sharing one correlation_id.
+    """
+    from audit import AuditSink
+    from db import create_schema, get_engine, get_sessionmaker
+    from models.schema import Result, Run
+
+    controls = load_controls()
+    run_id = uuid.uuid4()
+    correlation_id = uuid.uuid4()
+    started_at = _now()
+
+    engine = get_engine()
+    create_schema(engine)
+    session = get_sessionmaker(engine)()
+
+    try:
+        sink = AuditSink(session, correlation_id, run_id, actor=triggered_by)
+        persist_controls(session, controls)
+        session.add(Run(
+            run_id=run_id, correlation_id=correlation_id, triggered_by=triggered_by,
+            started_at=started_at, completed_at=None, status="running",
+        ))
+        session.commit()
+
+        sink.event("scan_started", "ok", {"mode": mode, "controls": len(controls)})
+        session.commit()
+
+        if mode == "live":
+            target = target_from_vagrant_ssh_config()
+            # Only the sources required by controls that actually APPLY to a Linux
+            # host. required_sources(controls) would include the AWS sources added in
+            # Phase 5, which the SSH collector has no command mapping for -- a latent
+            # break in the live-scan path that the cached path never exercises,
+            # because it skips collection entirely.
+            target["sources"] = required_sources(
+                [c for c in controls if "linux_server" in c["applies_to"]]
+            )
+            # Credentials come from secrets_manager because db_session is passed.
+            collector = SSHCollector(
+                db_session=session, actor=triggered_by,
+                correlation_id=correlation_id, run_id=run_id,
+            )
+            raw_docs = collector.collect(target)
+            collector_type = collector.collector_type
+        else:
+            path = pathlib.Path(raw_path or (REPO_ROOT / "phase1_raw_output.json"))
+            raw_docs = json.loads(path.read_text(encoding="utf-8"))
+            collector_type = raw_docs[0]["collector_type"]
+
+        resources = normalize(raw_docs, collector_type)
+
+        all_results = []
+        for control in controls:
+            all_results.extend(evaluate(
+                control, resources, audit_sink=sink,
+                correlation_id=str(correlation_id), run_id=str(run_id),
+                actor=triggered_by,
+            ))
+
+        evaluated_at = _now()
+        for result in all_results:
+            session.add(Result(
+                result_id=uuid.uuid4(), run_id=run_id,
+                control_id=result["control_id"], resource_id=result["resource_id"],
+                outcome=result["outcome"], evidence=result["evidence"],
+                evaluated_at=evaluated_at,
+            ))
+
+        run = session.get(Run, run_id)
+        run.completed_at = _now()
+        run.status = "completed"
+        sink.event("scan_completed", "ok", {"results": len(all_results)})
+        session.commit()
+
+        counts: dict[str, int] = {}
+        for r in all_results:
+            counts[r["outcome"]] = counts.get(r["outcome"], 0) + 1
+        scored = counts.get("pass", 0) + counts.get("fail", 0)
+
+        return {
+            "run_id": str(run_id),
+            "correlation_id": str(correlation_id),
+            "mode": mode,
+            "triggered_by": triggered_by,
+            "results": len(all_results),
+            "outcomes": counts,
+            "compliance_pct": round(100.0 * counts.get("pass", 0) / scored, 1)
+            if scored else None,
+        }
+    except Exception:
+        session.rollback()
+        run = session.get(Run, run_id)
+        if run is not None:
+            run.status = "failed"
+            run.completed_at = _now()
+            session.commit()
+        raise
+    finally:
+        session.close()
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--from-vagrant-ssh-config", action="store_true")
@@ -110,7 +220,14 @@ def main() -> int:
             }
         else:
             parser.error("supply --raw, --from-vagrant-ssh-config, or --host")
-        target["sources"] = required_sources(controls)
+        # Only the sources required by controls that actually APPLY to a Linux host.
+        # required_sources(controls) would include the AWS sources added in Phase 5,
+        # which the SSH collector has no command mapping for -- a latent break in the
+        # live-scan path that the cached path never exercises because it skips
+        # collection entirely.
+        target["sources"] = required_sources(
+            [c for c in controls if "linux_server" in c["applies_to"]]
+        )
         collector = SSHCollector()
         raw_docs = collector.collect(target)
         collector_type = collector.collector_type

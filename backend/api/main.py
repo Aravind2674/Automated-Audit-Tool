@@ -1,32 +1,45 @@
 """
-FastAPI application serving the dashboard and report export.
+FastAPI application: dashboard, report export, and the state-changing endpoints.
 
-Every endpoint is read-only and derives its numbers from the append-only `results`
-table via `backend/queries.py`. There is no summary table, no cached rollup and no
-figure computed in the frontend — the dashboard renders what the database says, so a
-number on screen can always be reproduced with a direct SQL query. The Phase 6
-verification harness does exactly that for every figure.
+**Authentication (Phase 7).** Session-based, per spec Section 1. Every endpoint
+except `/api/health` and `/api/auth/login` requires a valid session.
 
-Auth: spec Section 1 says session-based auth is sufficient for the MVP and Section 8
-rules out SSO/OAuth. No auth is implemented here yet — Phase 6's acceptance criteria
-concern the dashboard and export only. Flagged in BUILD_LOG as an open item; this API
-must not be exposed beyond localhost until it exists.
+The spec requires enforcement on the state-changing endpoints — scan trigger,
+exception request/approve, report export. This implementation goes slightly broader
+and also protects the read endpoints, because an unauthenticated `/api/dashboard`
+discloses the complete compliance posture of every audited host: which controls are
+failing, on which resources, with the evidence attached. That is a target list. The
+broader scope is noted in BUILD_LOG rather than assumed to be wanted.
+
+Enforcement is a FastAPI dependency (`require_session`) applied per route, not a
+middleware that could be bypassed by a route registered before it. `tests/verify_phase7.py`
+proves rejection with real unauthenticated HTTP calls rather than by reading the code.
 """
 
 from __future__ import annotations
 
 import datetime
 import io
+import json
 import pathlib
 import sys
+import uuid
 
 sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
 
-from fastapi import FastAPI, HTTPException, Query  # noqa: E402
+from fastapi import Body, Cookie, Depends, FastAPI, HTTPException, Query, Response  # noqa: E402
 from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
 from fastapi.responses import StreamingResponse  # noqa: E402
+from sqlalchemy import text  # noqa: E402
 
-from db import get_engine  # noqa: E402
+from auth.service import (  # noqa: E402
+    SESSION_COOKIE,
+    AuthError,
+    login as auth_login,
+    logout as auth_logout,
+    resolve_session,
+)
+from db import get_engine, get_sessionmaker  # noqa: E402
 from queries import (  # noqa: E402
     classify_drift,
     compliance_trend,
@@ -41,31 +54,79 @@ from queries import (  # noqa: E402
 
 app = FastAPI(
     title="Automated IT Systems Audit Tool",
-    description="Read-only dashboard and report API over append-only audit evidence.",
-    version="0.6.0",
+    description="Compliance dashboard and report API over append-only audit evidence.",
+    version="0.7.0",
 )
 
-# The Next.js dev server runs on a different port. Restricted to localhost origins;
-# this API has no auth yet and must not be reachable from anywhere else.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
-    allow_methods=["GET"],
+    allow_credentials=True,
+    allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
 
+_Session = None
+
+
+def _sessionmaker():
+    global _Session
+    if _Session is None:
+        _Session = get_sessionmaker(get_engine())
+    return _Session
+
+
+# ---------------------------------------------------------------------------
+# auth dependency
+# ---------------------------------------------------------------------------
+
+
+def require_session(audit_session: str | None = Cookie(default=None, alias=SESSION_COOKIE)):
+    """Reject anything without a valid, unexpired session.
+
+    Returns a plain dict rather than an ORM object so the caller does not hold a
+    detached instance after the session closes.
+    """
+    with _sessionmaker()() as s:
+        try:
+            user = resolve_session(s, audit_session)
+            identity = {"username": user.username, "role": user.role}
+        except AuthError as exc:
+            s.commit()  # persist any expired-session cleanup
+            raise HTTPException(
+                status_code=401,
+                detail=f"authentication required: {exc}",
+                headers={"WWW-Authenticate": "Cookie"},
+            ) from exc
+        s.commit()
+    return identity
+
+
+def _audit(s, actor, event_type, result, details, correlation_id=None, run_id=None):
+    s.execute(
+        text(
+            "INSERT INTO audit_log (event_id, correlation_id, run_id, actor, "
+            "event_type, timestamp, result, details) VALUES "
+            "(:e, :c, :r, :a, :et, :t, :res, CAST(:d AS jsonb))"
+        ),
+        {
+            "e": str(uuid.uuid4()),
+            "c": str(correlation_id or uuid.uuid4()),
+            "r": str(run_id) if run_id else None,
+            "a": actor,
+            "et": event_type,
+            "t": datetime.datetime.now(datetime.timezone.utc),
+            "res": result,
+            "d": json.dumps(details),
+        },
+    )
+
 
 def _provider(control_id: str) -> str:
-    """Which collector produced a control's findings.
-
-    Used to label AWS findings in the UI and PDF. Phase 5 is verified against moto
-    rather than a real account, so AWS findings carry a caveat that Linux findings do
-    not — presenting them side by side as equally evidenced would misrepresent both.
-    """
     return "aws" if control_id.startswith("AWS-") else "linux"
 
 
-def _resolve_run(conn, run_id: str | None):
+def _resolve_run(conn, run_id):
     if run_id:
         return run_id
     run = latest_completed_run(conn)
@@ -81,23 +142,70 @@ def _jsonable(value):
         return [_jsonable(v) for v in value]
     if isinstance(value, datetime.datetime):
         return value.isoformat()
-    if hasattr(value, "quantize"):  # Decimal
+    if hasattr(value, "quantize"):
         return float(value)
-    if hasattr(value, "hex") and hasattr(value, "int"):  # UUID
+    if isinstance(value, uuid.UUID):
         return str(value)
     return value
 
 
+# ---------------------------------------------------------------------------
+# public endpoints
+# ---------------------------------------------------------------------------
+
+
 @app.get("/api/health")
 def health() -> dict:
-    with get_engine().connect() as conn:
-        run = latest_completed_run(conn)
-    return {"status": "ok", "latest_completed_run": str(run) if run else None}
+    """Liveness only. Deliberately discloses no compliance data."""
+    return {"status": "ok"}
+
+
+@app.post("/api/auth/login")
+def login(response: Response, body: dict = Body(...)) -> dict:
+    username = str(body.get("username", ""))
+    password = str(body.get("password", ""))
+    with _sessionmaker()() as s:
+        try:
+            session_id = auth_login(s, username, password)
+        except AuthError as exc:
+            s.commit()  # the login_failed audit row must persist
+            raise HTTPException(401, str(exc)) from exc
+        s.commit()
+
+    response.set_cookie(
+        SESSION_COOKIE, session_id,
+        httponly=True,      # not readable from JavaScript -> XSS cannot steal it
+        samesite="lax",     # not sent on cross-site POSTs -> basic CSRF resistance
+        secure=False,       # localhost is http; MUST become True behind TLS
+        max_age=8 * 3600,
+        path="/",
+    )
+    return {"status": "ok", "username": username}
+
+
+# ---------------------------------------------------------------------------
+# authenticated endpoints
+# ---------------------------------------------------------------------------
+
+
+@app.post("/api/auth/logout")
+def logout(response: Response, identity=Depends(require_session),
+           audit_session: str | None = Cookie(default=None, alias=SESSION_COOKIE)) -> dict:
+    with _sessionmaker()() as s:
+        auth_logout(s, audit_session)
+        s.commit()
+    response.delete_cookie(SESSION_COOKIE, path="/")
+    return {"status": "ok"}
+
+
+@app.get("/api/auth/me")
+def me(identity=Depends(require_session)) -> dict:
+    return identity
 
 
 @app.get("/api/dashboard")
-def dashboard(run_id: str | None = Query(default=None)) -> dict:
-    """Everything the dashboard needs, in one round trip."""
+def dashboard(run_id: str | None = Query(default=None),
+              identity=Depends(require_session)) -> dict:
     with get_engine().connect() as conn:
         run = _resolve_run(conn, run_id)
         summary = dashboard_summary(conn, run)
@@ -109,54 +217,157 @@ def dashboard(run_id: str | None = Query(default=None)) -> dict:
         drift = []
         if len(trend) >= 2:
             rows = drift_between(conn, trend[-2]["run_id"], trend[-1]["run_id"])
-            buckets = classify_drift(rows)
-            drift = [
-                {"kind": kind, **_jsonable(row)}
-                for kind, rows_ in buckets.items()
-                for row in rows_
-            ]
+            drift = [{"kind": kind, **_jsonable(row)}
+                     for kind, rows_ in classify_drift(rows).items() for row in rows_]
 
-    return _jsonable(
-        {
-            "run_id": str(run),
-            "generated_at": datetime.datetime.now(datetime.timezone.utc),
-            "summary": summary,
-            "per_domain": domains,
-            "open_findings_by_severity": severities,
-            "exceptions": exceptions,
-            "trend": trend,
-            "drift_since_previous_run": drift,
-        }
-    )
+    return _jsonable({
+        "run_id": str(run),
+        "generated_at": datetime.datetime.now(datetime.timezone.utc),
+        "summary": summary, "per_domain": domains,
+        "open_findings_by_severity": severities, "exceptions": exceptions,
+        "trend": trend, "drift_since_previous_run": drift,
+        "viewer": identity["username"],
+    })
 
 
 @app.get("/api/findings")
-def findings(run_id: str | None = Query(default=None)) -> dict:
+def findings(run_id: str | None = Query(default=None),
+             identity=Depends(require_session)) -> dict:
     with get_engine().connect() as conn:
         run = _resolve_run(conn, run_id)
         rows = findings_for_report(conn, run)
+    return _jsonable({
+        "run_id": str(run),
+        "findings": [{**r, "provider": _provider(r["control_id"])} for r in rows],
+    })
 
-    return _jsonable(
-        {
-            "run_id": str(run),
-            "findings": [{**r, "provider": _provider(r["control_id"])} for r in rows],
-        }
-    )
+
+@app.post("/api/scans")
+def trigger_scan(body: dict = Body(default={}), identity=Depends(require_session)) -> dict:
+    """Trigger a scan. STATE-CHANGING -- requires a session, and is audited.
+
+    `mode="cached"` re-evaluates the stored raw collection; `mode="live"` collects
+    from the target over SSH first. Cached is the default because it is fast and
+    deterministic, which matters for a demo; live is the real thing.
+    """
+    from run_scan import execute_scan
+
+    mode = str(body.get("mode", "cached"))
+    if mode not in ("cached", "live"):
+        raise HTTPException(400, "mode must be 'cached' or 'live'")
+
+    try:
+        result = execute_scan(mode=mode, triggered_by=identity["username"])
+    except Exception as exc:  # noqa: BLE001 -- surfaced, and the attempt is audited
+        with _sessionmaker()() as s:
+            _audit(s, identity["username"], "scan_trigger_failed", "error",
+                   {"mode": mode, "error": f"{type(exc).__name__}: {exc}"})
+            s.commit()
+        raise HTTPException(500, f"scan failed: {type(exc).__name__}: {exc}") from exc
+
+    return _jsonable(result)
+
+
+@app.post("/api/exceptions")
+def request_exception_endpoint(body: dict = Body(...),
+                               identity=Depends(require_session)) -> dict:
+    """Request an exception. STATE-CHANGING -- requires a session, and is audited."""
+    from audit import AuditSink
+    from exceptions_service import ExceptionWorkflowError, request_exception
+
+    required = ("control_id", "resource_id", "justification", "expiry_date")
+    missing = [k for k in required if not body.get(k)]
+    if missing:
+        raise HTTPException(400, f"missing required field(s): {missing}")
+
+    try:
+        expiry = datetime.datetime.fromisoformat(str(body["expiry_date"]))
+        if expiry.tzinfo is None:
+            expiry = expiry.replace(tzinfo=datetime.timezone.utc)
+    except ValueError as exc:
+        raise HTTPException(400, f"expiry_date is not ISO-8601: {exc}") from exc
+
+    with _sessionmaker()() as s:
+        sink = AuditSink(s, uuid.uuid4(), None, actor=identity["username"])
+        try:
+            exception_id = request_exception(
+                s, body["control_id"], body["resource_id"],
+                # The requester is the AUTHENTICATED user, never a value from the
+                # request body. Otherwise separation of duties is trivially defeated
+                # by claiming to be someone else.
+                requested_by=identity["username"],
+                justification=body["justification"],
+                expiry_date=expiry,
+                compensating_control=body.get("compensating_control"),
+                audit_sink=sink,
+            )
+        except ExceptionWorkflowError as exc:
+            s.commit()
+            raise HTTPException(400, str(exc)) from exc
+        s.commit()
+    return {"exception_id": str(exception_id), "status": "pending_review"}
+
+
+@app.post("/api/exceptions/{exception_id}/approve")
+def approve_exception_endpoint(exception_id: str, body: dict = Body(default={}),
+                               identity=Depends(require_session)) -> dict:
+    """Approve an exception. STATE-CHANGING -- requires a session, and is audited.
+
+    The approver is the authenticated user. Separation of duties for high/critical
+    severity is enforced in exceptions_service and surfaces here as HTTP 403.
+    """
+    from audit import AuditSink
+    from exceptions_service import ApprovalError, approve_exception
+
+    with _sessionmaker()() as s:
+        sink = AuditSink(s, uuid.uuid4(), None, actor=identity["username"])
+        try:
+            approve_exception(
+                s, uuid.UUID(exception_id),
+                approved_by=identity["username"],
+                status=str(body.get("status", "accepted_risk")),
+                audit_sink=sink,
+            )
+        except ApprovalError as exc:
+            s.commit()  # the denial audit row must persist
+            raise HTTPException(403, str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(400, f"invalid exception_id: {exc}") from exc
+        s.commit()
+    return {"exception_id": exception_id, "approved_by": identity["username"]}
 
 
 @app.get("/api/reports/pdf")
-def report_pdf(run_id: str | None = Query(default=None)):
-    """Export the run as a framework-mapped PDF with per-finding evidence."""
+def report_pdf(run_id: str | None = Query(default=None),
+               identity=Depends(require_session)):
+    """Export the run as a PDF. Requires a session, and writes a report_exported row.
+
+    Export is audited because a compliance report is a disclosure event: it packages
+    every failing control, its evidence and its resource into one portable file. Who
+    took a copy, and when, is exactly what an investigator needs afterwards.
+    """
     from reports.generator import build_report
 
     with get_engine().connect() as conn:
         run = _resolve_run(conn, run_id)
         pdf_bytes = build_report(conn, run)
+        # Reuse the RUN's correlation_id rather than minting a new one. Spec Section 7
+        # requires a shared correlation_id per run, and an export tagged with a run_id
+        # but a fresh correlation_id would sit outside that run's trail -- an
+        # investigator following the correlation_id would never see that a report of
+        # this run was taken.
+        run_correlation = conn.execute(
+            text("SELECT correlation_id FROM runs WHERE run_id = :r"), {"r": run}
+        ).scalar()
+
+    with _sessionmaker()() as s:
+        _audit(s, identity["username"], "report_exported", "ok",
+               {"run_id": str(run), "format": "pdf", "bytes": len(pdf_bytes)},
+               correlation_id=run_correlation, run_id=run)
+        s.commit()
 
     return StreamingResponse(
         io.BytesIO(pdf_bytes),
         media_type="application/pdf",
-        headers={
-            "Content-Disposition": f'attachment; filename="audit-report-{run}.pdf"'
-        },
+        headers={"Content-Disposition": f'attachment; filename="audit-report-{run}.pdf"'},
     )

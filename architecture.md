@@ -506,7 +506,10 @@ Every deviation, with reasoning. Full detail in `BUILD_LOG.md`.
 | 5 | Same correctness bar as Phase 2, for the 6 AWS controls | ⚠️ **verified against moto only — NOT to the Phase 1–4 standard.** All checks pass across two independently written fixture scenarios, but every result came from a mock. **Open until re-validated against a real AWS account — see §3.6.** |
 | 6 | Dashboard: overall %, per-domain, exceptions with expiry, drift chart | ✅ verified (rendered in a real browser, DOM read back; 27 figures cross-checked against direct SQL written in a different style from the API's) |
 | 6 | PDF export: per-finding evidence, mapped to CIS/NIST/SOC2/CERT-In | ✅ verified (18/18 evidence blobs byte-match the stored JSONB; a tampered blob correctly fails, proving the check is not vacuous) |
-| 7 | — | not started |
+| 7 | Every state-changing action has an audit_log row with a shared correlation_id per run | ✅ verified (all four Section 7 actions recorded; one pre-fix correlation split documented and permanently retained, since audit_log is append-only) |
+| 7 | Hardcoded-secrets grep returns nothing | ✅ verified (no literals, no key material tracked, .env gitignored and untracked) |
+| 7 | Session auth enforced on scan-trigger / exception / report-export | ✅ verified with real unauthenticated HTTP against a running server: 7/7 protected endpoints 401, forged cookie 401, post-logout 401, HttpOnly confirmed in-browser |
+| 7 | Credentials migrated behind secrets_manager (Section 6) | ✅ verified — live SSH scan with the key decrypted from the Fernet store; Phase-1 TODO closed |
 
 No criterion in this table is marked verified without corresponding evidence recorded
 in `BUILD_LOG.md`.

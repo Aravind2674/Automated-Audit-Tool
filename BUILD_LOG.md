@@ -1067,6 +1067,197 @@ side as equally evidenced would misrepresent both.
   Phase 7.
 - **Phase 5 real-AWS validation** remains a tracked open item.
 
+---
+
+## Phase 7 — Audit log + security review pass + session auth
+
+**Date:** 2026-08-27
+**Status:** ✅ **COMPLETE — all acceptance criteria met with evidence.**
+
+### ⚠️ Spec sync failure at the start of this phase
+
+The project owner reported CLAUDE.md updated to sha256 `61011adb…` / 465 lines, adding
+a session-auth requirement to Phase 7. **That version never reached this machine.** The
+file on disk was `6c02e1c1…` / 451 lines, last written 15:49, and its Phase 7 text
+contained no mention of auth or sessions.
+
+Work proceeded anyway because the owner's chat message stated the requirements
+unambiguously — session auth on scan-trigger/exception/report-export, the
+`secrets_manager` migration, and a real rejected curl. The unread 14 lines remain
+unverified; the owner was asked to confirm nothing else was in them. This is the
+second sync failure in the project (Section 11 was the first), and the hash check is
+what caught both.
+
+### What was built
+
+- **`backend/secrets_manager.py`** — Fernet credential store (spec Section 6).
+- **`backend/auth/service.py`** — bcrypt passwords, server-side sessions.
+- **`backend/bootstrap.py`** — create users, import the demo VM key encrypted.
+- **`backend/api/main.py`** — auth dependency plus the state-changing endpoints:
+  `POST /api/scans`, `POST /api/exceptions`, `POST /api/exceptions/{id}/approve`.
+- **`backend/models/schema.py`** — `credentials`, `users`, `sessions` tables.
+- **`frontend/components/Login.tsx`** and a login gate in the dashboard.
+- **`tests/verify_phase7.py`** — 51 checks.
+
+### Acceptance: auth enforced, proved with real unauthenticated HTTP ✅
+
+Not middleware-in-code, and not FastAPI's in-process TestClient. Real requests to a
+running server:
+
+```
+unauthenticated GET  /api/dashboard              -> 401
+unauthenticated GET  /api/findings               -> 401
+unauthenticated GET  /api/reports/pdf            -> 401
+unauthenticated GET  /api/auth/me                -> 401
+unauthenticated POST /api/scans                  -> 401
+unauthenticated POST /api/exceptions             -> 401
+unauthenticated POST /api/exceptions/{id}/approve-> 401
+unauthenticated GET  /api/health                 -> 200   (discloses no compliance data)
+forged session cookie                            -> 401
+login with wrong password                        -> 401
+login with correct password                      -> 200, HttpOnly + SameSite cookie
+authenticated GET /api/dashboard                 -> 200
+after logout, GET /api/dashboard                 -> 401
+```
+
+**Verified in a browser too:** `document.cookie` returns empty while the session is
+active — HttpOnly is doing its job, so an XSS flaw in the dashboard cannot exfiltrate
+the session. The login form was exercised through its real `onSubmit` handler and
+transitioned the page to the dashboard as `aravind`.
+
+Scope note: the spec named the three state-changing endpoints. Enforcement was applied
+to the read endpoints as well, because an unauthenticated `/api/dashboard` discloses
+which controls are failing on which resources with evidence attached — a target list.
+Going broader than asked is flagged here rather than assumed to be wanted.
+
+**Identity is taken from the session, never from the request body.** The exception
+endpoints set `requested_by`/`approved_by` from the authenticated user. Accepting them
+from the body would let a caller claim to be someone else and defeat separation of
+duties with a text edit. Confirmed through the API: `aravind` self-approving a `high`
+control gets **403**; `priya` approving the same exception gets **200**.
+
+### Acceptance: credentials behind secrets_manager — Phase-1 TODO closed ✅
+
+The demo VM's SSH key is stored as Fernet ciphertext and fetched at scan time:
+
+```
+POST /api/scans {"mode":"live"}
+  -> {"run_id":"75aed5d6-...","results":18,"outcomes":{"fail":15,"pass":3},
+      "compliance_pct":16.7}
+
+credential_used | aravind | ok | {"target_id": "demo-ubuntu-vagrant"}
+```
+
+A live scan over SSH, with the key decrypted from the store. Checks:
+
+```
+PASS  secrets_manager.py is the ONLY module that decrypts
+PASS  collectors never read the credentials table directly
+PASS  ssh_collector calls secrets_manager.get_credential
+PASS  the Phase-1 credential TODO is closed
+PASS  credentials table holds ciphertext only, no PEM markers
+PASS  passwords are bcrypt hashes, not reversible
+PASS  credential_used never records the credential value
+PASS  credential_used records the target_id
+```
+
+Key material is never written to disk. Paramiko is handed the key in memory rather
+than via `key_filename`, because writing it to a temp file to satisfy that parameter
+would leave plaintext key material on the filesystem — the exact thing the encrypted
+store exists to prevent.
+
+### Acceptance: audit-log sweep ✅
+
+Every event type present, and all four Section 7 state-changing actions recorded:
+
+```
+credential_used    | aravind | ok            | {"target_id": "demo-ubuntu-vagrant"}
+exception_approved | priya   | accepted_risk | {"severity":"high","control_id":"CIS-5.4.1",...}
+report_exported    | aravind | ok            | {"bytes":43984,"format":"pdf","run_id":...}
+scan_started       | aravind | ok            | {"mode":"live","controls":24}
+```
+
+Login successes and failures are audited too — a brute-force attempt is invisible
+without the failures.
+
+### Bug found and fixed: report_exported sat outside its run's trail
+
+The first version of the export endpoint minted a **fresh** `correlation_id` while
+still tagging the row with the `run_id`. An investigator following a run's
+correlation_id would never have seen that a report of it was taken. Fixed to reuse the
+run's correlation_id; every run after the fix is clean.
+
+**The bad row was NOT deleted or rewritten.** `audit_log` is append-only, so run
+`75aed5d6` permanently carries two correlation_ids. Being unable to erase one's own
+mistake is the guarantee working correctly, so it is documented in
+`tests/verify_phase7.py` as a known pre-fix anomaly with the reason, and the harness
+asserts that no *new* run has the problem rather than pretending the old one does not.
+
+### Bug found and fixed: Phase 5 broke the live-scan path
+
+`required_sources(controls)` returned the AWS sources added in Phase 5, which the SSH
+collector has no command mapping for:
+
+```
+CollectorError: no command mapping for source(s):
+  ['cloudtrail','ebs_volume','iam_root','s3_bucket','security_group']
+```
+
+Every live scan — CLI and API — would have failed since Phase 5. It went unnoticed
+because Phases 6 and 7 exercised the cached path, which skips collection entirely.
+Fixed by filtering to controls whose `applies_to` includes `linux_server`.
+
+**This is the strongest argument in the project for Section 9's insistence on running
+things rather than reasoning about them.** The code looked right, every existing test
+passed, and the break was only visible by actually triggering a live scan.
+
+A second, smaller one: `paramiko.DSSKey` no longer exists in Paramiko 5.0.0, and
+naming it unconditionally raised `AttributeError` for *every* key type including RSA.
+Key classes are now resolved by name with `getattr`.
+
+### Acceptance: hardcoded-secrets grep returns nothing ✅
+
+```
+PASS  no hardcoded secrets in tracked source        ([])
+PASS  .env is gitignored
+PASS  .env is NOT tracked by git
+PASS  no key material tracked in git                ([])
+PASS  no UPDATE/DELETE against results or audit_log in the codebase
+```
+
+Patterns cover assigned literal secrets, embedded private keys, AWS access key ids,
+hardcoded Fernet keys and DB URLs with inline passwords, across `.py/.ts/.tsx/.js/
+.yaml/.sh/.json` in backend, tests, frontend and demo-environment.
+
+### Rule 8
+
+Auth enforcement is proved over real HTTP against a running server — a dependency
+attached to the wrong router, a middleware bypassed by route ordering, or a server
+running stale code would all pass a code review and fail this. The stale-code case
+was real: the first check run hit a server still running pre-auth code and returned
+200, which is exactly what the live-HTTP approach is for.
+
+`tests/verify_phase6.py` now authenticates through the real `/api/auth/login` rather
+than disabling the dependency — a test that turns auth off to reach what it is testing
+stops verifying the deployed configuration.
+
+### Deviations and open items
+
+- **`backend/auth/service.py`, `bootstrap.py`, `secrets_manager.py`** — Section 2 lists
+  `/auth` and `secrets_manager.py`; `bootstrap.py` is new.
+- **`credentials`, `users`, `sessions` tables** are not in the Section 3 DDL. Section 6
+  requires a credentials table without specifying its shape; users/sessions follow from
+  the Phase 7 auth requirement.
+- **Session cookie has `secure=False`** because the demo runs over plain HTTP on
+  localhost. **This MUST become `True` behind TLS** — a session cookie without the
+  Secure flag is sent over unencrypted connections. Marked in the code.
+- **No password-reset, lockout, or rate-limiting on login.** Failures are audited, but
+  nothing throttles them. Out of scope for the MVP; a real deployment needs it.
+- **No CSRF token.** `SameSite=lax` blocks the common cross-site POST case, which is
+  adequate for a localhost MVP but is not a substitute for a token.
+- **A live scan runs synchronously in the request.** It takes ~20s and will block a
+  worker; a real deployment wants a job queue.
+
 ### Addendum 3 — 2026-08-27, source control and collaboration setup
 
 Prompted by an imminent laptop switch and additional contributors joining.

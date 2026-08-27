@@ -165,3 +165,59 @@ class AuditLog(Base):
     timestamp: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
     result: Mapped[str] = mapped_column(String, nullable=False)
     details: Mapped[dict | None] = mapped_column(JSONB)
+
+
+class Credential(Base):
+    """Encrypted credential store. Spec Section 6.
+
+    Holds ONLY Fernet ciphertext. Plaintext never reaches this table, and
+    `backend/secrets_manager.py` is the only module permitted to decrypt what is here.
+
+    Not in the Section 3 DDL — Section 6 requires "a credentials table" without
+    specifying its shape, so this is defined to the minimum that section demands.
+    """
+
+    __tablename__ = "credentials"
+
+    target_id: Mapped[str] = mapped_column(String, primary_key=True)
+    credential_type: Mapped[str] = mapped_column(String, nullable=False)
+    #: Fernet token. Never plaintext.
+    ciphertext: Mapped[str] = mapped_column(Text, nullable=False)
+    description: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class User(Base):
+    """Local user account for session auth (spec Section 1: session-based is enough).
+
+    Passwords are stored as bcrypt hashes, never reversibly encrypted — a password
+    store must not be decryptable even by the application, which is the opposite of
+    the credentials table above and the reason they are separate tables with separate
+    handling.
+    """
+
+    __tablename__ = "users"
+
+    username: Mapped[str] = mapped_column(String, primary_key=True)
+    password_hash: Mapped[str] = mapped_column(String, nullable=False)
+    role: Mapped[str] = mapped_column(String, nullable=False, default="auditor")
+    created_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+    disabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+
+class Session(Base):
+    """Server-side session. The cookie carries only an opaque id.
+
+    Sessions are stored server-side rather than as signed client-side tokens so that
+    revocation is immediate: deleting the row ends the session. A self-contained JWT
+    cannot be revoked before it expires without building the very server-side state
+    this table already is.
+    """
+
+    __tablename__ = "sessions"
+
+    session_id: Mapped[str] = mapped_column(String, primary_key=True)
+    username: Mapped[str] = mapped_column(String, ForeignKey("users.username"),
+                                          nullable=False)
+    created_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+    expires_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
