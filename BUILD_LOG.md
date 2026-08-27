@@ -389,6 +389,136 @@ the absence of an API rather than by everyone remembering it.
   Section 6). Unchanged from Phase 1; still marked TODO; must close before Phase 7.
 - **Legacy-host reachability** (Addendum 4) remains open for `architecture.md`.
 
+---
+
+## Phase 3 — Historical results + drift
+
+**Date:** 2026-08-27
+**Status:** ✅ **COMPLETE — both acceptance criteria met with evidence.**
+
+### What was built
+
+- **`backend/queries.py`** — read-only historical queries: compliance trend per run,
+  drift between any two runs, latest-completed-run resolution, and drift
+  classification into improved / regressed / appeared / disappeared / other.
+- **`tests/verify_phase3.py`** — append-only verification harness and trend validator.
+
+No changes were made to the collector, normalizer or evaluator. Phase 3 is entirely
+additive, which is the point: history is *derived* from the append-only results table,
+not maintained alongside it.
+
+### Design notes
+
+**Drift is computed, never stored.** There is no drift table and no changelog. A drift
+report for any pair of historical runs is a query over `results`, so it can be
+regenerated at any time and can never fall out of sync with the evidence it describes.
+
+**`manual_review` and `error` are excluded from the compliance denominator.** A control
+awaiting human judgement has not passed and has not failed, and an unreadable source is
+a broken audit rather than a compliance failure. Counting either as a failure would
+make the headline percentage move for reasons unrelated to the host's security posture
+— an SSH permission problem would look like a security regression. Both are returned as
+separate counts so a reader sees they exist instead of having them silently vanish.
+
+**`FULL JOIN` + `IS DISTINCT FROM` in the drift query.** An inner join would drop a
+control present in only one of the two runs — a control added to or removed from the
+library, or a resource that fell out of a scan — which is exactly the kind of change a
+drift report must not silently omit. `IS DISTINCT FROM` rather than `<>` for the same
+reason: `NULL <> 'pass'` evaluates to NULL, not true, so a plain inequality would
+discard those very rows.
+
+### Acceptance criterion 1 — two scans, two run_ids, no mutation of prior rows ✅
+
+Four scans were run. Before each, every existing `results` and `audit_log` row was
+fingerprinted **column-by-column with SHA-256**; afterwards the pre-existing rows were
+fingerprinted again and compared. A row count alone would catch deletions but not
+mutations — if a later run silently rewrote a prior finding's `outcome` or `evidence`,
+which is precisely what the append-only rule exists to prevent, the count would be
+unchanged and the digest would not.
+
+```
+TABLE       BEFORE   AFTER   NEW  MUTATED  DELETED
+run 2:  results  18 ->  36    18        0        0
+        audit_log 20 ->  40    20        0        0
+run 3:  results  36 ->  54    18        0        0
+        audit_log 40 ->  60    20        0        0
+run 4:  results  54 ->  72    18        0        0
+        audit_log 60 ->  80    20        0        0
+```
+
+Four distinct run_ids, four distinct correlation_ids, one correlation_id per run:
+
+```
+   run    | events | distinct_corr_ids        total_distinct_corr_ids | total_runs
+----------+--------+-------------------      -------------------------+------------
+ c4b93ee3 |     20 |                 1                             4 |          4
+ 51f38dd3 |     20 |                 1
+ 81fad9d8 |     20 |                 1
+ b4811f62 |     20 |                 1
+```
+
+**Run 1's evidence survived three subsequent scans unchanged.** `/etc/shadow` was
+changed to 640 and back to 644 during Phase 3, and run 1 still records what it observed
+at the time:
+
+```
+SELECT evidence->'checks'->0->>'actual' FROM results
+WHERE run_id='c4b93ee3-...' AND control_id='CIS-1.4.2';   ->  644
+```
+
+That is the property that makes a finding defensible months later.
+
+### Acceptance criterion 2 — trend query returns correct data ✅
+
+Real drift was induced rather than simulated. Two controls were remediated on the live
+VM between runs 2 and 3 (`chmod 640 /etc/shadow`, `ip_forward = 0`), each verified by
+hand on the host before and after (rule 6), then reverted before run 4 to restore the
+documented posture.
+
+```
+#   RUN_ID     COMPLETED             PASS  FAIL  ERR  MR  COMPLIANCE
+1   c4b93ee3   2026-08-27 15:23:52      3    15    0   0       16.7%
+2   51f38dd3   2026-08-27 15:30:48      3    15    0   0       16.7%
+3   81fad9d8   2026-08-27 15:31:46      5    13    0   0       27.8%
+4   b4811f62   2026-08-27 15:32:32      3    15    0   0       16.7%
+
+Drift between consecutive runs:
+  c4b93ee3 -> 51f38dd3: no change
+  51f38dd3 -> 81fad9d8: 2 improved
+      improved   CIS-1.4.2  [critical] fail -> pass
+      improved   CIS-3.2.1  [medium]   fail -> pass
+  81fad9d8 -> b4811f62: 2 regressed
+      regressed  CIS-1.4.2  [critical] pass -> fail
+      regressed  CIS-3.2.1  [medium]   pass -> fail
+```
+
+Runs 1→2 are identical scans of an unchanged host and correctly show **no drift**,
+which matters as much as detecting the change: a drift report that flags spurious
+differences between identical scans is unusable.
+
+### Rule 8 — independent self-verification
+
+Three independent checks, none sharing a code path with the thing under test:
+
+1. **Trend recomputed in Python** from raw `GROUP BY outcome` counts and compared
+   against the `FILTER`-based aggregate: `PASS: all 4 trend rows independently
+   recomputed and matched.`
+2. **Trend and drift recomputed in `psql`** using deliberately different SQL — a
+   `CASE/SUM` aggregate instead of `FILTER`, and a window-function self-join instead of
+   `FULL JOIN`. Both produced identical numbers (16.7 / 16.7 / 27.8 / 16.7, and the
+   same 4 drift rows).
+3. **Latest run's persisted outcomes re-derived on the host** over a fresh SSH
+   connection using the independent command set: **18/18 matched, 0 mismatched.**
+
+### Deviations and open items
+
+- **`backend/queries.py` is not in the Section 2 file listing.** Added as a read-only
+  query module rather than putting historical SQL in `engine/`, which Section 5
+  reserves for the normalizer and evaluator.
+- **Credentials still come from the target dict**, not `secrets_manager` (Section 6).
+  Unchanged; still `# TODO`; must close before Phase 7.
+- **Legacy-host reachability** (Addendum 4, architecture.md §3.1) remains open.
+
 ### Addendum 3 — 2026-08-27, source control and collaboration setup
 
 Prompted by an imminent laptop switch and additional contributors joining.

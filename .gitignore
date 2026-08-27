@@ -64,3 +64,6 @@ desktop.ini
 .idea/
 *.swp
 *~
+
+# Phase 3 verification snapshot (per-machine, regenerated on demand)
+tests/.phase3_snapshot.json

@@ -15,7 +15,7 @@ anything — it defines the phase order, the schemas, and the rules the code fol
 |---|---|
 | 1 — Control library + SSH collector (raw output) | ✅ complete, verified |
 | 2 — Normalizer + evaluator + persistence | ✅ complete, verified |
-| 3 — Historical results + drift | not started |
+| 3 — Historical results + drift | ✅ complete, verified |
 | 4–7 | not started |
 
 Latest scan of the demo VM: **3 pass, 15 fail, 16.7% compliance**, every verdict
@@ -250,6 +250,24 @@ independently of the collector's, and compares against the evaluator:
 
 ```bash
 ./venv/Scripts/python.exe tests/crosscheck_phase2.py --from-vagrant-ssh-config
+```
+
+Phase 3 — compliance trend per run, with each row independently recomputed, plus drift
+between consecutive runs. Needs the database, not the VM:
+
+```bash
+./venv/Scripts/python.exe tests/verify_phase3.py --trend
+```
+
+Prove historical rows are immutable across a new scan — fingerprint every existing row,
+run a scan, then confirm nothing prior changed:
+
+```bash
+./venv/Scripts/python.exe tests/verify_phase3.py --snapshot-before
+```
+
+```bash
+./venv/Scripts/python.exe tests/verify_phase3.py --verify-after
 ```
 
 ---

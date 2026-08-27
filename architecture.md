@@ -365,6 +365,20 @@ The append-only rule is enforced structurally rather than by convention:
 update or delete method, so violating the rule requires bypassing the module rather
 than merely forgetting the rule exists.
 
+### Drift is computed, never stored
+
+There is no drift table and no changelog. A drift report for any pair of historical
+runs is a query over `results` (`backend/queries.py`), so it can be regenerated at any
+time and can never fall out of sync with the evidence it describes. The same reasoning
+governs current posture, which is always "results from the latest completed run".
+
+`manual_review` and `error` are excluded from the compliance denominator. A control
+awaiting human judgement has not passed and has not failed, and an unreadable source is
+a broken audit rather than a compliance failure. Counting either as a failure would
+make the headline percentage move for reasons unrelated to the host's security posture
+— an SSH permission problem would render as a security regression. Both are reported as
+separate counts so they stay visible instead of silently vanishing.
+
 ---
 
 ## 6. Deviations from spec
@@ -397,7 +411,9 @@ Every deviation, with reasoning. Full detail in `BUILD_LOG.md`.
 | 1 | Collector returns real raw output from the VM | ✅ verified (14/14 sources, 66/66 commands; 7/7 rule-8 cross-check) |
 | 2 | Correct pass/fail for all 18 controls vs the VM's actual config | ✅ verified (0 mismatches; 18/18 rule-8 cross-check) |
 | 2 | Every run writes a `runs` row and per-control `results` rows | ✅ verified against live PostgreSQL 17.11 (1 run, 18 results, 20 audit_log rows sharing one correlation_id; 18/18 rule-8 cross-check of persisted rows vs fresh on-host derivation) |
-| 3–7 | — | not started |
+| 3 | Same scan twice → two distinct `run_id`s, no mutation of prior rows | ✅ verified (4 runs; per-row SHA-256 fingerprints show 0 mutated, 0 deleted across every scan) |
+| 3 | Basic trend query (compliance % per run over time) returns correct data | ✅ verified (recomputed independently in Python and in `psql` with different SQL; real induced drift detected, identical scans correctly show none) |
+| 4–7 | — | not started |
 
 No criterion in this table is marked verified without corresponding evidence recorded
 in `BUILD_LOG.md`.
