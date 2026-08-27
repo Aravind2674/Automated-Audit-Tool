@@ -41,19 +41,18 @@ yarn-error.log*
 *.box
 
 # ---------------------------------------------------------------------------
-# Collected audit evidence.
+# Collected audit evidence -- DELIBERATELY NOT IGNORED.
 #
-# phase1_raw_output.json contains the full configuration of an audited host --
-# sshd config, PAM stack, sudoers, firewall rules, account aging. For the throwaway
-# demo VM that is harmless, but committing it trains the wrong habit: point this
-# tool at a real server and the same file becomes a detailed map of that host's
-# weaknesses. Keep collected evidence out of source control as a rule, not as a
-# judgement call made per-file.
+# Spec Section 11: small evidence artifacts (e.g. phase1_raw_output.json) are part
+# of the audit trail this project exists to produce, and are fine to commit. Only
+# multi-megabyte or regenerable machine output is excluded -- see *.box above and
+# build/ below.
+#
+# Caveat for later phases: these files contain the full configuration of whatever
+# host was audited. Harmless for the throwaway demo VM. If this tool is ever pointed
+# at a real production server, the resulting evidence file is a detailed map of that
+# host's weaknesses and should not land in a shared repository without thought.
 # ---------------------------------------------------------------------------
-phase1_raw_output.json
-*_raw_output.json
-evidence/
-*.log
 
 # ---------------------------------------------------------------------------
 # OS / editor noise

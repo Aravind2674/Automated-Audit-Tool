@@ -27,11 +27,21 @@ export DEBIAN_FRONTEND=noninteractive
 # CIS-5.2.10 -- FAIL: permit direct root login over SSH.
 # CIS-5.2.11 -- FAIL: offer weak CBC ciphers and SHA-1/MD5 MACs.
 # ---------------------------------------------------------------------------
+# NOTE on the KexAlgorithms list: "curve25519-sha256@libssh.org" is included
+# alongside the plain "curve25519-sha256". They are the same algorithm -- RFC 8731
+# standardised the plain name after OpenSSH had already shipped the vendor-suffixed
+# one -- and a real OpenSSH host offers both. Pinning only the plain name left the
+# VM with no key exchange algorithm in common with Paramiko 5.0.0, which lists only
+# the "@libssh.org" spelling, so the collector could not connect at all. Offering
+# both is the realistic configuration, not a concession to the tool.
+#
+# CIS-5.2.11 still fails here as intended: diffie-hellman-group14-sha1 (SHA-1 KEX),
+# CBC-mode ciphers and hmac-md5/hmac-sha1 all remain on offer.
 cat > /etc/ssh/sshd_config.d/99-audit-demo.conf <<'SSHEOF'
 PermitRootLogin yes
 Ciphers aes128-cbc,3des-cbc,aes256-cbc,aes128-ctr,aes256-ctr
 MACs hmac-md5,hmac-sha1,hmac-sha2-256
-KexAlgorithms diffie-hellman-group14-sha1,curve25519-sha256
+KexAlgorithms diffie-hellman-group14-sha1,curve25519-sha256,curve25519-sha256@libssh.org
 SSHEOF
 chmod 644 /etc/ssh/sshd_config.d/99-audit-demo.conf
 sshd -t && systemctl restart ssh

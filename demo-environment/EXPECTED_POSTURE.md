@@ -8,10 +8,18 @@ The target is deliberately a **mix**: 4 controls are configured to pass and 14 t
 fail. A demo host that fails everything cannot distinguish a correct evaluator from
 one that returns `fail` unconditionally.
 
-> **Status of this table:** these are the outcomes the provisioner is *written to
-> produce*. They have **not yet been confirmed against a running VM** — see
-> BUILD_LOG.md, Phase 1. Each row must be re-checked by hand on the live VM before
-> Phase 2 uses it as ground truth.
+> **Status of this table — partially verified.**
+>
+> **10 of the 18 rows are CONFIRMED** against the live VM, by locating the specific
+> expected state in the raw evidence collected in Phase 1 (see BUILD_LOG.md
+> Addendum 4): CIS-5.2.10, CIS-5.3.1, CIS-5.3.2, CIS-3.2.1, CIS-3.3.1, CIS-4.1.1,
+> CIS-1.1.1, CIS-1.4.1, CIS-1.4.2, CIS-6.1.1.
+>
+> **The remaining 8 are still unverified** — CIS-5.2.11, CIS-5.4.1, CIS-3.1.1,
+> CIS-4.1.2, CIS-4.2.1, CIS-1.1.2, CIS-1.5.1, CIS-1.6.1. For those rows this table
+> records only what `provision.sh` is *written to* produce, not what the VM was
+> observed to do. Confirm each by hand during Phase 2 before treating it as ground
+> truth.
 
 | Control | Severity | Expected | What `provision.sh` does | Manual verification command |
 |---|---|---|---|---|

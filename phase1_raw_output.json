@@ -1,0 +1,670 @@
+[
+  {
+    "source": "auditd",
+    "collector_type": "ssh",
+    "target_id": "demo-ubuntu-vagrant",
+    "resource_type": "linux_server",
+    "resource_id": "linux_server:demo-ubuntu-vagrant",
+    "collected_at": "2026-08-27T09:24:38.336518+00:00",
+    "commands": [
+      {
+        "command": "dpkg-query -W -f='${Package} ${Status} ${Version}\\n' auditd",
+        "exit_code": 1,
+        "stdout": "",
+        "stderr": "dpkg-query: no packages found matching auditd\n",
+        "timed_out": false,
+        "duration_ms": 417.6
+      },
+      {
+        "command": "systemctl is-enabled auditd 2>&1; true",
+        "exit_code": 0,
+        "stdout": "Failed to get unit file state for auditd.service: No such file or directory\n",
+        "stderr": "",
+        "timed_out": false,
+        "duration_ms": 36.3
+      },
+      {
+        "command": "systemctl is-active auditd 2>&1; true",
+        "exit_code": 0,
+        "stdout": "inactive\n",
+        "stderr": "",
+        "timed_out": false,
+        "duration_ms": 36.2
+      },
+      {
+        "command": "cat /etc/audit/auditd.conf",
+        "exit_code": 1,
+        "stdout": "",
+        "stderr": "cat: /etc/audit/auditd.conf: No such file or directory\n",
+        "timed_out": false,
+        "duration_ms": 24.6
+      },
+      {
+        "command": "sudo -n auditctl -s",
+        "exit_code": 1,
+        "stdout": "",
+        "stderr": "sudo: auditctl: command not found\n",
+        "timed_out": false,
+        "duration_ms": 36.1
+      }
+    ]
+  },
+  {
+    "source": "coredump",
+    "collector_type": "ssh",
+    "target_id": "demo-ubuntu-vagrant",
+    "resource_type": "linux_server",
+    "resource_id": "linux_server:demo-ubuntu-vagrant",
+    "collected_at": "2026-08-27T09:24:38.541303+00:00",
+    "commands": [
+      {
+        "command": "grep -E 'core' /etc/security/limits.conf 2>/dev/null; true",
+        "exit_code": 0,
+        "stdout": "#        - core - limits the core file size (KB)\n#*               soft    core            0\n#root            hard    core            100000\n",
+        "stderr": "",
+        "timed_out": false,
+        "duration_ms": 24.8
+      },
+      {
+        "command": "for f in /etc/security/limits.d/*.conf; do [ -f \"$f\" ] && echo \"### $f\" && cat \"$f\"; done 2>/dev/null; true",
+        "exit_code": 0,
+        "stdout": "### /etc/security/limits.d/99-audit-demo.conf\n* hard core unlimited\n",
+        "stderr": "",
+        "timed_out": false,
+        "duration_ms": 27.0
+      },
+      {
+        "command": "sysctl fs.suid_dumpable 2>&1; true",
+        "exit_code": 0,
+        "stdout": "fs.suid_dumpable = 2\n",
+        "stderr": "",
+        "timed_out": false,
+        "duration_ms": 26.7
+      },
+      {
+        "command": "cat /etc/systemd/coredump.conf",
+        "exit_code": 1,
+        "stdout": "",
+        "stderr": "cat: /etc/systemd/coredump.conf: No such file or directory\n",
+        "timed_out": false,
+        "duration_ms": 36.5
+      },
+      {
+        "command": "for f in /etc/systemd/coredump.conf.d/*.conf; do [ -f \"$f\" ] && echo \"### $f\" && cat \"$f\"; done 2>/dev/null; true",
+        "exit_code": 0,
+        "stdout": "",
+        "stderr": "",
+        "timed_out": false,
+        "duration_ms": 26.5
+      },
+      {
+        "command": "dpkg-query -W -f='${Package} ${Status}\\n' systemd-coredump",
+        "exit_code": 1,
+        "stdout": "",
+        "stderr": "dpkg-query: no packages found matching systemd-coredump\n",
+        "timed_out": false,
+        "duration_ms": 36.6
+      },
+      {
+        "command": "ulimit -Hc",
+        "exit_code": 0,
+        "stdout": "unlimited\n",
+        "stderr": "",
+        "timed_out": false,
+        "duration_ms": 26.5
+      }
+    ]
+  },
+  {
+    "source": "file_permissions",
+    "collector_type": "ssh",
+    "target_id": "demo-ubuntu-vagrant",
+    "resource_type": "linux_server",
+    "resource_id": "linux_server:demo-ubuntu-vagrant",
+    "collected_at": "2026-08-27T09:24:38.568056+00:00",
+    "commands": [
+      {
+        "command": "stat -c '%n mode=%a owner=%U group=%G' /etc/passwd /etc/shadow /etc/group /etc/gshadow 2>&1; true",
+        "exit_code": 0,
+        "stdout": "/etc/passwd mode=644 owner=root group=root\n/etc/shadow mode=644 owner=root group=shadow\n/etc/group mode=644 owner=root group=root\n/etc/gshadow mode=640 owner=root group=shadow\n",
+        "stderr": "",
+        "timed_out": false,
+        "duration_ms": 26.7
+      }
+    ]
+  },
+  {
+    "source": "firewall",
+    "collector_type": "ssh",
+    "target_id": "demo-ubuntu-vagrant",
+    "resource_type": "linux_server",
+    "resource_id": "linux_server:demo-ubuntu-vagrant",
+    "collected_at": "2026-08-27T09:24:38.971440+00:00",
+    "commands": [
+      {
+        "command": "sudo -n ufw status verbose",
+        "exit_code": 0,
+        "stdout": "Status: inactive\n",
+        "stderr": "",
+        "timed_out": false,
+        "duration_ms": 119.5
+      },
+      {
+        "command": "systemctl is-enabled ufw 2>&1; true",
+        "exit_code": 0,
+        "stdout": "disabled\n",
+        "stderr": "",
+        "timed_out": false,
+        "duration_ms": 58.6
+      },
+      {
+        "command": "systemctl is-active ufw 2>&1; true",
+        "exit_code": 0,
+        "stdout": "active\n",
+        "stderr": "",
+        "timed_out": false,
+        "duration_ms": 35.9
+      },
+      {
+        "command": "sudo -n iptables -S",
+        "exit_code": 0,
+        "stdout": "-P INPUT ACCEPT\n-P FORWARD ACCEPT\n-P OUTPUT ACCEPT\n",
+        "stderr": "",
+        "timed_out": false,
+        "duration_ms": 45.1
+      },
+      {
+        "command": "sudo -n nft list ruleset",
+        "exit_code": 0,
+        "stdout": "table ip filter {\n\tchain INPUT {\n\t\ttype filter hook input priority filter; policy accept;\n\t}\n\n\tchain OUTPUT {\n\t\ttype filter hook output priority filter; policy accept;\n\t}\n\n\tchain FORWARD {\n\t\ttype filter hook forward priority filter; policy accept;\n\t}\n}\ntable ip6 filter {\n\tchain INPUT {\n\t\ttype filter hook input priority filter; policy accept;\n\t}\n\n\tchain OUTPUT {\n\t\ttype filter hook output priority filter; policy accept;\n\t}\n\n\tchain FORWARD {\n\t\ttype filter hook forward priority filter; policy accept;\n\t}\n}\n",
+        "stderr": "",
+        "timed_out": false,
+        "duration_ms": 70.1
+      },
+      {
+        "command": "systemctl is-enabled nftables 2>&1; true",
+        "exit_code": 0,
+        "stdout": "disabled\n",
+        "stderr": "",
+        "timed_out": false,
+        "duration_ms": 37.5
+      },
+      {
+        "command": "systemctl is-enabled firewalld 2>&1; true",
+        "exit_code": 0,
+        "stdout": "Failed to get unit file state for firewalld.service: No such file or directory\n",
+        "stderr": "",
+        "timed_out": false,
+        "duration_ms": 36.7
+      }
+    ]
+  },
+  {
+    "source": "kernel_modules",
+    "collector_type": "ssh",
+    "target_id": "demo-ubuntu-vagrant",
+    "resource_type": "linux_server",
+    "resource_id": "linux_server:demo-ubuntu-vagrant",
+    "collected_at": "2026-08-27T09:24:39.347780+00:00",
+    "commands": [
+      {
+        "command": "for m in cramfs freevxfs jffs2 hfs hfsplus squashfs udf; do echo \"### $m\"; modprobe -n -v \"$m\" 2>&1; done; true",
+        "exit_code": 0,
+        "stdout": "### cramfs\ninstall /bin/false \n### freevxfs\ninstall /bin/false \n### jffs2\ninstall /bin/false \n### hfs\ninstall /bin/false \n### hfsplus\ninstall /bin/false \n### squashfs\n### udf\ninsmod /lib/modules/5.15.0-190-generic/kernel/lib/crc-itu-t.ko \ninstall /bin/false \n",
+        "stderr": "",
+        "timed_out": false,
+        "duration_ms": 68.3
+      },
+      {
+        "command": "lsmod",
+        "exit_code": 0,
+        "stdout": "Module                  Size  Used by\nnf_tables             274432  0\nnfnetlink              20480  1 nf_tables\ntls                   114688  0\nisofs                  53248  0\njoydev                 32768  0\ninput_leds             16384  0\nserio_raw              20480  0\nvboxguest              45056  0\nvideo                  65536  0\nbinfmt_misc            24576  1\ndm_multipath           40960  0\nscsi_dh_rdac           20480  0\nscsi_dh_emc            16384  0\nscsi_dh_alua           20480  0\nsch_fq_codel           20480  3\nefi_pstore             16384  0\nip_tables              32768  0\nx_tables               53248  1 ip_tables\nautofs4                49152  2\nbtrfs                1568768  0\nblake2b_generic        20480  0\nzstd_compress         229376  1 btrfs\nraid10                 69632  0\nraid456               163840  0\nasync_raid6_recov      24576  1 raid456\nasync_memcpy           20480  2 raid456,async_raid6_recov\nasync_pq               24576  2 raid456,async_raid6_recov\nasync_xor              20480  3 async_pq,raid456,async_raid6_recov\nasync_tx               20480  5 async_pq,async_memcpy,async_xor,raid456,async_raid6_recov\nxor                    24576  2 async_xor,btrfs\nraid6_pq              122880  4 async_pq,btrfs,raid456,async_raid6_recov\nlibcrc32c              16384  3 btrfs,nf_tables,raid456\nraid1                  49152  0\nraid0                  24576  0\nmultipath              20480  0\nlinear                 20480  0\ncrct10dif_pclmul       16384  1\ncrc32_pclmul           16384  0\nghash_clmulni_intel    16384  0\nsha256_ssse3           32768  0\nsha1_ssse3             32768  0\nvboxvideo              28672  0\ndrm_vram_helper        24576  1 vboxvideo\ndrm_ttm_helper         16384  2 drm_vram_helper,vboxvideo\nmptspi                 24576  1\nscsi_transport_spi     32768  1 mptspi\nttm                    86016  2 drm_vram_helper,drm_ttm_helper\nmptscsih               49152  1 mptspi\ndrm_kms_helper        315392  4 drm_vram_helper,vboxvideo\nsyscopyarea            16384  1 drm_kms_helper\naesni_intel           376832  0\nsysfillrect            20480  1 drm_kms_helper\nsysimgblt              16384  1 drm_kms_helper\ncrypto_simd            16384  1 aesni_intel\nfb_sys_fops            16384  1 drm_kms_helper\ncec                    65536  1 drm_kms_helper\nrc_core                65536  1 cec\ndrm                   622592  6 drm_kms_helper,drm_vram_helper,vboxvideo,drm_ttm_helper,ttm\ncryptd                 24576  2 crypto_simd,ghash_clmulni_intel\npsmouse               184320  0\nmptbase               106496  2 mptspi,mptscsih\ne1000                 159744  0\n",
+        "stderr": "",
+        "timed_out": false,
+        "duration_ms": 36.2
+      },
+      {
+        "command": "modprobe --showconfig 2>/dev/null | grep -E 'cramfs|freevxfs|jffs2|hfs|hfsplus|squashfs|udf'; true",
+        "exit_code": 0,
+        "stdout": "blacklist cramfs\nblacklist freevxfs\nblacklist jffs2\nblacklist hfs\nblacklist hfsplus\nblacklist squashfs\nblacklist udf\ninstall cramfs /bin/false\ninstall freevxfs /bin/false\ninstall jffs2 /bin/false\ninstall hfs /bin/false\ninstall hfsplus /bin/false\ninstall squashfs /bin/false\ninstall udf /bin/false\nalias fs_udf udf\nalias symbol:lua_pushfstring zlua\n",
+        "stderr": "",
+        "timed_out": false,
+        "duration_ms": 203.9
+      },
+      {
+        "command": "for f in /etc/modprobe.d/*.conf; do [ -f \"$f\" ] && echo \"### $f\" && cat \"$f\"; done 2>/dev/null; true",
+        "exit_code": 0,
+        "stdout": "### /etc/modprobe.d/99-audit-demo-filesystems.conf\ninstall cramfs /bin/false\nblacklist cramfs\ninstall freevxfs /bin/false\nblacklist freevxfs\ninstall jffs2 /bin/false\nblacklist jffs2\ninstall hfs /bin/false\nblacklist hfs\ninstall hfsplus /bin/false\nblacklist hfsplus\ninstall squashfs /bin/false\nblacklist squashfs\ninstall udf /bin/false\nblacklist udf\n### /etc/modprobe.d/blacklist-ath_pci.conf\n# For some Atheros 5K RF MACs, the madwifi driver loads buts fails to\n# correctly initialize the hardware, leaving it in a state from\n# which ath5k cannot recover. To prevent this condition, stop\n# madwifi from loading by default. Use Jockey to select one driver\n# or the other. (Ubuntu: #315056, #323830)\nblacklist ath_pci\n\n### /etc/modprobe.d/blacklist-firewire.conf\n# Select the legacy firewire stack over the new CONFIG_FIREWIRE one.\n\nblacklist ohci1394\nblacklist sbp2\nblacklist dv1394\nblacklist raw1394\nblacklist video1394\n\n#blacklist firewire-ohci\n#blacklist firewire-sbp2\n### /etc/modprobe.d/blacklist-framebuffer.conf\n# Framebuffer drivers are generally buggy and poorly-supported, and cause\n# suspend failures, kernel panics and general mayhem.  For this reason we\n# never load them automatically.\nblacklist aty128fb\nblacklist atyfb\nblacklist radeonfb\nblacklist cirrusfb\nblacklist cyber2000fb\nblacklist cyblafb\nblacklist gx1fb\nblacklist hgafb\nblacklist i810fb\nblacklist intelfb\nblacklist kyrofb\nblacklist lxfb\nblacklist matroxfb_base\nblacklist neofb\nblacklist nvidiafb\nblacklist pm2fb\nblacklist rivafb\nblacklist s1d13xxxfb\nblacklist savagefb\nblacklist sisfb\nblacklist sstfb\nblacklist tdfxfb\nblacklist tridentfb\n#blacklist vesafb\nblacklist vfb\nblacklist viafb\nblacklist vt8623fb\nblacklist udlfb\n### /etc/modprobe.d/blacklist-rare-network.conf\n# Many less commonly used network protocols have recently had various\n# security flaws discovered. In an effort to reduce the scope of future\n# vulnerability exploitations, they are being blacklisted here so that\n# unprivileged users cannot use them by default. System owners can still\n# either modify this file, or specifically modprobe any needed protocols.\n\n# ax25\nalias net-pf-3 off\n# netrom\nalias net-pf-6 off\n# x25\nalias net-pf-9 off\n# rose\nalias net-pf-11 off\n# decnet\nalias net-pf-12 off\n# econet\nalias net-pf-19 off\n# rds\nalias net-pf-21 off\n# af_802154\nalias net-pf-36 off\n### /etc/modprobe.d/blacklist.conf\n# This file lists those modules which we don't want to be loaded by\n# alias expansion, usually so some other driver will be loaded for the\n# device instead.\n\n# evbug is a debug tool that should be loaded explicitly\nblacklist evbug\n\n# these drivers are very simple, the HID drivers are usually preferred\nblacklist usbmouse\nblacklist usbkbd\n\n# replaced by e100\nblacklist eepro100\n\n# replaced by tulip\nblacklist de4x5\n\n# causes no end of confusion by creating unexpected network interfaces\nblacklist eth1394\n\n# snd_intel8x0m can interfere with snd_intel8x0, doesn't seem to support much\n# hardware on its own (Ubuntu bug #2011, #6810)\nblacklist snd_intel8x0m\n\n# Conflicts with dvb driver (which is better for handling this device)\nblacklist snd_aw2\n\n# replaced by p54pci\nblacklist prism54\n\n# replaced by b43 and ssb.\nblacklist bcm43xx\n\n# most apps now use garmin usb driver directly (Ubuntu: #114565)\nblacklist garmin_gps\n\n# replaced by asus-laptop (Ubuntu: #184721)\nblacklist asus_acpi\n\n# low-quality, just noise when being used for sound playback, causes\n# hangs at desktop session start (Ubuntu: #246969)\nblacklist snd_pcsp\n\n# ugly and loud noise, getting on everyone's nerves; this should be done by a\n# nice pulseaudio bing (Ubuntu: #77010)\nblacklist pcspkr\n\n# EDAC driver for amd76x clashes with the agp driver preventing the aperture\n# from being initialised (Ubuntu: #297750). Blacklist so that the driver\n# continues to build and is installable for the few cases where its\n# really needed.\nblacklist amd76x_edac\n### /etc/modprobe.d/disable-algif_aead.conf\n# Disable algif_aead module due to CVE-2026-31431 (AKA copy.fail)\n# This will likely be re-enabled in a subsequent update once an updated\n# kernel has been deployed.\n# Blacklisting the module isn't sufficient, we need to do as below:\ninstall algif_aead /bin/false\n### /etc/modprobe.d/iwlwifi.conf\n# /etc/modprobe.d/iwlwifi.conf\n# iwlwifi will dyamically load either iwldvm or iwlmvm depending on the\n# microcode file installed on the system.  When removing iwlwifi, first\n# remove the iwl?vm module and then iwlwifi.\nremove iwlwifi \\\n(/sbin/lsmod | grep -o -e ^iwlmvm -e ^iwldvm -e ^iwlwifi | xargs /sbin/rmmod) \\\n&& /sbin/modprobe -r mac80211\n### /etc/modprobe.d/mdadm.conf\n# mdadm module configuration file\n# set start_ro=1 to make newly assembled arrays read-only initially,\n# to prevent metadata writes.  This is needed in order to allow\n# resume-from-disk to work - new boot should not perform writes\n# because it will be done behind the back of the system being\n# resumed.  See http://bugs.debian.org/415441 for details.\n\noptions md_mod start_ro=1\n",
+        "stderr": "",
+        "timed_out": false,
+        "duration_ms": 67.9
+      }
+    ]
+  },
+  {
+    "source": "login_defs",
+    "collector_type": "ssh",
+    "target_id": "demo-ubuntu-vagrant",
+    "resource_type": "linux_server",
+    "resource_id": "linux_server:demo-ubuntu-vagrant",
+    "collected_at": "2026-08-27T09:24:39.444731+00:00",
+    "commands": [
+      {
+        "command": "grep -E '^\\s*PASS_' /etc/login.defs",
+        "exit_code": 0,
+        "stdout": "PASS_MAX_DAYS\t99999\nPASS_MIN_DAYS\t0\nPASS_WARN_AGE\t7\n",
+        "stderr": "",
+        "timed_out": false,
+        "duration_ms": 27.3
+      },
+      {
+        "command": "for u in $(awk -F: '($3>=1000)&&($3<65534){print $1}' /etc/passwd); do echo \"### $u\"; sudo -n chage -l \"$u\"; done",
+        "exit_code": 0,
+        "stdout": "### vagrant\nLast password change\t\t\t\t\t: Aug 26, 2026\nPassword expires\t\t\t\t\t: never\nPassword inactive\t\t\t\t\t: never\nAccount expires\t\t\t\t\t\t: never\nMinimum number of days between password change\t\t: 0\nMaximum number of days between password change\t\t: 99999\nNumber of days of warning before password expires\t: 7\n### ubuntu\nLast password change\t\t\t\t\t: Aug 27, 2026\nPassword expires\t\t\t\t\t: never\nPassword inactive\t\t\t\t\t: never\nAccount expires\t\t\t\t\t\t: never\nMinimum number of days between password change\t\t: 0\nMaximum number of days between password change\t\t: 99999\nNumber of days of warning before password expires\t: 7\n",
+        "stderr": "",
+        "timed_out": false,
+        "duration_ms": 69.6
+      }
+    ]
+  },
+  {
+    "source": "mounts",
+    "collector_type": "ssh",
+    "target_id": "demo-ubuntu-vagrant",
+    "resource_type": "linux_server",
+    "resource_id": "linux_server:demo-ubuntu-vagrant",
+    "collected_at": "2026-08-27T09:24:39.599394+00:00",
+    "commands": [
+      {
+        "command": "findmnt --kernel --noheadings --output TARGET,SOURCE,FSTYPE,OPTIONS /tmp 2>&1; true",
+        "exit_code": 0,
+        "stdout": "",
+        "stderr": "",
+        "timed_out": false,
+        "duration_ms": 27.1
+      },
+      {
+        "command": "findmnt --kernel --noheadings --output TARGET,SOURCE,FSTYPE,OPTIONS",
+        "exit_code": 0,
+        "stdout": "/                                             /dev/sda1              ext4        rw,relatime,discard,errors=remount-ro\n\u00e2\u201d\u0153\u00e2\u201d\u20ac/sys                                        sysfs                  sysfs       rw,nosuid,nodev,noexec,relatime\n\u00e2\u201d\u201a \u00e2\u201d\u0153\u00e2\u201d\u20ac/sys/kernel/security                      securityfs             securityfs  rw,nosuid,nodev,noexec,relatime\n\u00e2\u201d\u201a \u00e2\u201d\u0153\u00e2\u201d\u20ac/sys/fs/cgroup                            cgroup2                cgroup2     rw,nosuid,nodev,noexec,relatime,nsdelegate,memory_recursiveprot\n\u00e2\u201d\u201a \u00e2\u201d\u0153\u00e2\u201d\u20ac/sys/fs/pstore                            pstore                 pstore      rw,nosuid,nodev,noexec,relatime\n\u00e2\u201d\u201a \u00e2\u201d\u0153\u00e2\u201d\u20ac/sys/fs/bpf                               bpf                    bpf         rw,nosuid,nodev,noexec,relatime,mode=700\n\u00e2\u201d\u201a \u00e2\u201d\u0153\u00e2\u201d\u20ac/sys/kernel/debug                         debugfs                debugfs     rw,nosuid,nodev,noexec,relatime\n\u00e2\u201d\u201a \u00e2\u201d\u0153\u00e2\u201d\u20ac/sys/kernel/tracing                       tracefs                tracefs     rw,nosuid,nodev,noexec,relatime\n\u00e2\u201d\u201a \u00e2\u201d\u0153\u00e2\u201d\u20ac/sys/fs/fuse/connections                  fusectl                fusectl     rw,nosuid,nodev,noexec,relatime\n\u00e2\u201d\u201a \u00e2\u201d\u201d\u00e2\u201d\u20ac/sys/kernel/config                        configfs               configfs    rw,nosuid,nodev,noexec,relatime\n\u00e2\u201d\u0153\u00e2\u201d\u20ac/proc                                       proc                   proc        rw,nosuid,nodev,noexec,relatime\n\u00e2\u201d\u201a \u00e2\u201d\u201d\u00e2\u201d\u20ac/proc/sys/fs/binfmt_misc                  systemd-1              autofs      rw,relatime,fd=29,pgrp=1,timeout=0,minproto=5,maxproto=5,direct,pipe_ino=15257\n\u00e2\u201d\u201a   \u00e2\u201d\u201d\u00e2\u201d\u20ac/proc/sys/fs/binfmt_misc                binfmt_misc            binfmt_misc rw,nosuid,nodev,noexec,relatime\n\u00e2\u201d\u0153\u00e2\u201d\u20ac/dev                                        udev                   devtmpfs    rw,nosuid,relatime,size=469368k,nr_inodes=117342,mode=755,inode64\n\u00e2\u201d\u201a \u00e2\u201d\u0153\u00e2\u201d\u20ac/dev/pts                                  devpts                 devpts      rw,nosuid,noexec,relatime,gid=5,mode=620,ptmxmode=000\n\u00e2\u201d\u201a \u00e2\u201d\u0153\u00e2\u201d\u20ac/dev/shm                                  tmpfs                  tmpfs       rw,nosuid,nodev,inode64\n\u00e2\u201d\u201a \u00e2\u201d\u0153\u00e2\u201d\u20ac/dev/hugepages                            hugetlbfs              hugetlbfs   rw,relatime,pagesize=2M\n\u00e2\u201d\u201a \u00e2\u201d\u201d\u00e2\u201d\u20ac/dev/mqueue                               mqueue                 mqueue      rw,nosuid,nodev,noexec,relatime\n\u00e2\u201d\u0153\u00e2\u201d\u20ac/run                                        tmpfs                  tmpfs       rw,nosuid,nodev,noexec,relatime,size=98040k,mode=755,inode64\n\u00e2\u201d\u201a \u00e2\u201d\u0153\u00e2\u201d\u20ac/run/lock                                 tmpfs                  tmpfs       rw,nosuid,nodev,noexec,relatime,size=5120k,inode64\n\u00e2\u201d\u201a \u00e2\u201d\u0153\u00e2\u201d\u20ac/run/credentials/systemd-sysusers.service none                   ramfs       ro,nosuid,nodev,noexec,relatime,mode=700\n\u00e2\u201d\u201a \u00e2\u201d\u0153\u00e2\u201d\u20ac/run/user/1000                            tmpfs                  tmpfs       rw,nosuid,nodev,relatime,size=98036k,nr_inodes=24509,mode=700,uid=1000,gid=1000,inode64\n\u00e2\u201d\u201a \u00e2\u201d\u201d\u00e2\u201d\u20ac/run/snapd/ns                             tmpfs[/snapd/ns]       tmpfs       rw,nosuid,nodev,noexec,relatime,size=98040k,mode=755,inode64\n\u00e2\u201d\u201a   \u00e2\u201d\u201d\u00e2\u201d\u20ac/run/snapd/ns/lxd.mnt                   nsfs[mnt:[4026532195]] nsfs        rw\n\u00e2\u201d\u0153\u00e2\u201d\u20ac/snap/core22/2437                           /dev/loop1             squashfs    ro,nodev,relatime,errors=continue\n\u00e2\u201d\u0153\u00e2\u201d\u20ac/snap/lxd/40338                             /dev/loop0             squashfs    ro,nodev,relatime,errors=continue\n\u00e2\u201d\u201d\u00e2\u201d\u20ac/snap/snapd/27710                           /dev/loop2             squashfs    ro,nodev,relatime,errors=continue\n",
+        "stderr": "",
+        "timed_out": false,
+        "duration_ms": 38.5
+      },
+      {
+        "command": "cat /etc/fstab",
+        "exit_code": 0,
+        "stdout": "LABEL=cloudimg-rootfs\t/\t ext4\tdiscard,errors=remount-ro\t0 1\n#VAGRANT-BEGIN\n# The contents below are automatically generated by Vagrant. Do not modify.\n#VAGRANT-END\n",
+        "stderr": "",
+        "timed_out": false,
+        "duration_ms": 25.9
+      },
+      {
+        "command": "systemctl is-enabled tmp.mount 2>&1; true",
+        "exit_code": 0,
+        "stdout": "masked\n",
+        "stderr": "",
+        "timed_out": false,
+        "duration_ms": 37.0
+      },
+      {
+        "command": "cat /proc/mounts",
+        "exit_code": 0,
+        "stdout": "sysfs /sys sysfs rw,nosuid,nodev,noexec,relatime 0 0\nproc /proc proc rw,nosuid,nodev,noexec,relatime 0 0\nudev /dev devtmpfs rw,nosuid,relatime,size=469368k,nr_inodes=117342,mode=755,inode64 0 0\ndevpts /dev/pts devpts rw,nosuid,noexec,relatime,gid=5,mode=620,ptmxmode=000 0 0\ntmpfs /run tmpfs rw,nosuid,nodev,noexec,relatime,size=98040k,mode=755,inode64 0 0\n/dev/sda1 / ext4 rw,relatime,discard,errors=remount-ro 0 0\nsecurityfs /sys/kernel/security securityfs rw,nosuid,nodev,noexec,relatime 0 0\ntmpfs /dev/shm tmpfs rw,nosuid,nodev,inode64 0 0\ntmpfs /run/lock tmpfs rw,nosuid,nodev,noexec,relatime,size=5120k,inode64 0 0\ncgroup2 /sys/fs/cgroup cgroup2 rw,nosuid,nodev,noexec,relatime,nsdelegate,memory_recursiveprot 0 0\npstore /sys/fs/pstore pstore rw,nosuid,nodev,noexec,relatime 0 0\nbpf /sys/fs/bpf bpf rw,nosuid,nodev,noexec,relatime,mode=700 0 0\nsystemd-1 /proc/sys/fs/binfmt_misc autofs rw,relatime,fd=29,pgrp=1,timeout=0,minproto=5,maxproto=5,direct,pipe_ino=15257 0 0\nhugetlbfs /dev/hugepages hugetlbfs rw,relatime,pagesize=2M 0 0\nmqueue /dev/mqueue mqueue rw,nosuid,nodev,noexec,relatime 0 0\ndebugfs /sys/kernel/debug debugfs rw,nosuid,nodev,noexec,relatime 0 0\ntracefs /sys/kernel/tracing tracefs rw,nosuid,nodev,noexec,relatime 0 0\nfusectl /sys/fs/fuse/connections fusectl rw,nosuid,nodev,noexec,relatime 0 0\nconfigfs /sys/kernel/config configfs rw,nosuid,nodev,noexec,relatime 0 0\nnone /run/credentials/systemd-sysusers.service ramfs ro,nosuid,nodev,noexec,relatime,mode=700 0 0\n/dev/loop1 /snap/core22/2437 squashfs ro,nodev,relatime,errors=continue 0 0\n/dev/loop0 /snap/lxd/40338 squashfs ro,nodev,relatime,errors=continue 0 0\n/dev/loop2 /snap/snapd/27710 squashfs ro,nodev,relatime,errors=continue 0 0\nbinfmt_misc /proc/sys/fs/binfmt_misc binfmt_misc rw,nosuid,nodev,noexec,relatime 0 0\ntmpfs /run/snapd/ns tmpfs rw,nosuid,nodev,noexec,relatime,size=98040k,mode=755,inode64 0 0\nnsfs /run/snapd/ns/lxd.mnt nsfs rw 0 0\ntmpfs /run/user/1000 tmpfs rw,nosuid,nodev,relatime,size=98036k,nr_inodes=24509,mode=700,uid=1000,gid=1000,inode64 0 0\n",
+        "stderr": "",
+        "timed_out": false,
+        "duration_ms": 26.1
+      }
+    ]
+  },
+  {
+    "source": "pam_faillock",
+    "collector_type": "ssh",
+    "target_id": "demo-ubuntu-vagrant",
+    "resource_type": "linux_server",
+    "resource_id": "linux_server:demo-ubuntu-vagrant",
+    "collected_at": "2026-08-27T09:24:39.754169+00:00",
+    "commands": [
+      {
+        "command": "cat /etc/security/faillock.conf",
+        "exit_code": 0,
+        "stdout": "# Configuration for locking the user after multiple failed\n# authentication attempts.\n#\n# The directory where the user files with the failure records are kept.\n# The default is /var/run/faillock.\n# dir = /var/run/faillock\n#\n# Will log the user name into the system log if the user is not found.\n# Enabled if option is present.\n# audit\n#\n# Don't print informative messages.\n# Enabled if option is present.\n# silent\n#\n# Don't log informative messages via syslog.\n# Enabled if option is present.\n# no_log_info\n#\n# Only track failed user authentications attempts for local users\n# in /etc/passwd and ignore centralized (AD, IdM, LDAP, etc.) users.\n# The `faillock` command will also no longer track user failed\n# authentication attempts. Enabling this option will prevent a\n# double-lockout scenario where a user is locked out locally and\n# in the centralized mechanism.\n# Enabled if option is present.\n# local_users_only\n#\n# Deny access if the number of consecutive authentication failures\n# for this user during the recent interval exceeds n tries.\n# The default is 3.\n# deny = 3\n#\n# The length of the interval during which the consecutive\n# authentication failures must happen for the user account\n# lock out is <replaceable>n</replaceable> seconds.\n# The default is 900 (15 minutes).\n# fail_interval = 900\n#\n# The access will be re-enabled after n seconds after the lock out.\n# The value 0 has the same meaning as value `never` - the access\n# will not be re-enabled without resetting the faillock\n# entries by the `faillock` command.\n# The default is 600 (10 minutes).\n# unlock_time = 600\n#\n# Root account can become locked as well as regular accounts.\n# Enabled if option is present.\n# even_deny_root\n#\n# This option implies the `even_deny_root` option.\n# Allow access after n seconds to root account after the\n# account is locked. In case the option is not specified\n# the value is the same as of the `unlock_time` option.\n# root_unlock_time = 900\n#\n# If a group name is specified with this option, members\n# of the group will be handled by this module the same as\n# the root account (the options `even_deny_root>` and\n# `root_unlock_time` will apply to them.\n# By default, the option is not set.\n# admin_group = <admin_group_name>\n",
+        "stderr": "",
+        "timed_out": false,
+        "duration_ms": 36.8
+      },
+      {
+        "command": "cat /etc/pam.d/common-auth",
+        "exit_code": 0,
+        "stdout": "#\n# /etc/pam.d/common-auth - authentication settings common to all services\n#\n# This file is included from other service-specific PAM config files,\n# and should contain a list of the authentication modules that define\n# the central authentication scheme for use on the system\n# (e.g., /etc/shadow, LDAP, Kerberos, etc.).  The default is to use the\n# traditional Unix authentication mechanisms.\n#\n# As of pam 1.0.1-6, this file is managed by pam-auth-update by default.\n# To take advantage of this, it is recommended that you configure any\n# local modules either before or after the default block, and use\n# pam-auth-update to manage selection of other modules.  See\n# pam-auth-update(8) for details.\n\n# here are the per-package modules (the \"Primary\" block)\nauth\t[success=1 default=ignore]\tpam_unix.so nullok\n# here's the fallback if no module succeeds\nauth\trequisite\t\t\tpam_deny.so\n# prime the stack with a positive return value if there isn't one already;\n# this avoids us returning an error just because nothing sets a success code\n# since the modules above will each just jump around\nauth\trequired\t\t\tpam_permit.so\n# and here are more per-package modules (the \"Additional\" block)\nauth\toptional\t\t\tpam_cap.so \n# end of pam-auth-update config\n",
+        "stderr": "",
+        "timed_out": false,
+        "duration_ms": 35.3
+      },
+      {
+        "command": "grep -rn 'pam_faillock\\|pam_tally' /etc/pam.d/ 2>/dev/null; true",
+        "exit_code": 0,
+        "stdout": "",
+        "stderr": "",
+        "timed_out": false,
+        "duration_ms": 46.2
+      },
+      {
+        "command": "grep -rn 'pam_faillock' /usr/share/pam-configs/ 2>/dev/null; true",
+        "exit_code": 0,
+        "stdout": "",
+        "stderr": "",
+        "timed_out": false,
+        "duration_ms": 36.4
+      }
+    ]
+  },
+  {
+    "source": "pwquality",
+    "collector_type": "ssh",
+    "target_id": "demo-ubuntu-vagrant",
+    "resource_type": "linux_server",
+    "resource_id": "linux_server:demo-ubuntu-vagrant",
+    "collected_at": "2026-08-27T09:24:39.907405+00:00",
+    "commands": [
+      {
+        "command": "cat /etc/security/pwquality.conf",
+        "exit_code": 0,
+        "stdout": "# Configuration for systemwide password quality limits\n# Defaults:\n#\n# Number of characters in the new password that must not be present in the\n# old password.\n# difok = 1\n#\n# Minimum acceptable size for the new password (plus one if\n# credits are not disabled which is the default). (See pam_cracklib manual.)\n# Cannot be set to lower value than 6.\nminlen = 8\n#\n# The maximum credit for having digits in the new password. If less than 0\n# it is the minimum number of digits in the new password.\n# dcredit = 0\n#\n# The maximum credit for having uppercase characters in the new password.\n# If less than 0 it is the minimum number of uppercase characters in the new\n# password.\n# ucredit = 0\n#\n# The maximum credit for having lowercase characters in the new password.\n# If less than 0 it is the minimum number of lowercase characters in the new\n# password.\n# lcredit = 0\n#\n# The maximum credit for having other characters in the new password.\n# If less than 0 it is the minimum number of other characters in the new\n# password.\n# ocredit = 0\n#\n# The minimum number of required classes of characters for the new\n# password (digits, uppercase, lowercase, others).\n# minclass = 0\n#\n# The maximum number of allowed consecutive same characters in the new password.\n# The check is disabled if the value is 0.\n# maxrepeat = 0\n#\n# The maximum number of allowed consecutive characters of the same class in the\n# new password.\n# The check is disabled if the value is 0.\n# maxclassrepeat = 0\n#\n# Whether to check for the words from the passwd entry GECOS string of the user.\n# The check is enabled if the value is not 0.\n# gecoscheck = 0\n#\n# Whether to check for the words from the cracklib dictionary.\n# The check is enabled if the value is not 0.\n# dictcheck = 1\n#\n# Whether to check if it contains the user name in some form.\n# The check is enabled if the value is not 0.\n# usercheck = 1\n#\n# Length of substrings from the username to check for in the password\n# The check is enabled if the value is greater than 0 and usercheck is enabled.\n# usersubstr = 0\n#\n# Whether the check is enforced by the PAM module and possibly other\n# applications.\n# The new password is rejected if it fails the check and the value is not 0.\n# enforcing = 1\n#\n# Path to the cracklib dictionaries. Default is to use the cracklib default.\n# dictpath =\n#\n# Prompt user at most N times before returning with error. The default is 1.\n# retry = 3\n#\n# Enforces pwquality checks on the root user password.\n# Enabled if the option is present.\n# enforce_for_root\n#\n# Skip testing the password quality for users that are not present in the\n# /etc/passwd file.\n# Enabled if the option is present.\n# local_users_only\n",
+        "stderr": "",
+        "timed_out": false,
+        "duration_ms": 26.0
+      },
+      {
+        "command": "for f in /etc/security/pwquality.conf.d/*.conf; do [ -f \"$f\" ] && echo \"### $f\" && cat \"$f\"; done 2>/dev/null; true",
+        "exit_code": 0,
+        "stdout": "",
+        "stderr": "",
+        "timed_out": false,
+        "duration_ms": 25.6
+      },
+      {
+        "command": "cat /etc/pam.d/common-password",
+        "exit_code": 0,
+        "stdout": "#\n# /etc/pam.d/common-password - password-related modules common to all services\n#\n# This file is included from other service-specific PAM config files,\n# and should contain a list of modules that define the services to be\n# used to change user passwords.  The default is pam_unix.\n\n# Explanation of pam_unix options:\n# The \"yescrypt\" option enables\n#hashed passwords using the yescrypt algorithm, introduced in Debian\n#11.  Without this option, the default is Unix crypt.  Prior releases\n#used the option \"sha512\"; if a shadow password hash will be shared\n#between Debian 11 and older releases replace \"yescrypt\" with \"sha512\"\n#for compatibility .  The \"obscure\" option replaces the old\n#`OBSCURE_CHECKS_ENAB' option in login.defs.  See the pam_unix manpage\n#for other options.\n\n# As of pam 1.0.1-6, this file is managed by pam-auth-update by default.\n# To take advantage of this, it is recommended that you configure any\n# local modules either before or after the default block, and use\n# pam-auth-update to manage selection of other modules.  See\n# pam-auth-update(8) for details.\n\n# here are the per-package modules (the \"Primary\" block)\npassword\trequisite\t\t\tpam_pwquality.so retry=3\npassword\t[success=1 default=ignore]\tpam_unix.so obscure use_authtok try_first_pass yescrypt\n# here's the fallback if no module succeeds\npassword\trequisite\t\t\tpam_deny.so\n# prime the stack with a positive return value if there isn't one already;\n# this avoids us returning an error just because nothing sets a success code\n# since the modules above will each just jump around\npassword\trequired\t\t\tpam_permit.so\n# and here are more per-package modules (the \"Additional\" block)\n# end of pam-auth-update config\n",
+        "stderr": "",
+        "timed_out": false,
+        "duration_ms": 27.5
+      },
+      {
+        "command": "dpkg-query -W -f='${Package} ${Status}\\n' libpam-pwquality",
+        "exit_code": 0,
+        "stdout": "libpam-pwquality install ok installed\n",
+        "stderr": "",
+        "timed_out": false,
+        "duration_ms": 36.7
+      },
+      {
+        "command": "grep -E '^\\s*(PASS_MIN_LEN|PASS_MIN_DAYS)' /etc/login.defs",
+        "exit_code": 0,
+        "stdout": "PASS_MIN_DAYS\t0\n",
+        "stderr": "",
+        "timed_out": false,
+        "duration_ms": 37.2
+      }
+    ]
+  },
+  {
+    "source": "rsyslog",
+    "collector_type": "ssh",
+    "target_id": "demo-ubuntu-vagrant",
+    "resource_type": "linux_server",
+    "resource_id": "linux_server:demo-ubuntu-vagrant",
+    "collected_at": "2026-08-27T09:24:40.147632+00:00",
+    "commands": [
+      {
+        "command": "cat /etc/rsyslog.conf",
+        "exit_code": 0,
+        "stdout": "# /etc/rsyslog.conf configuration file for rsyslog\n#\n# For more information install rsyslog-doc and see\n# /usr/share/doc/rsyslog-doc/html/configuration/index.html\n#\n# Default logging rules can be found in /etc/rsyslog.d/50-default.conf\n\n\n#################\n#### MODULES ####\n#################\n\nmodule(load=\"imuxsock\") # provides support for local system logging\n#module(load=\"immark\")  # provides --MARK-- message capability\n\n# provides UDP syslog reception\n#module(load=\"imudp\")\n#input(type=\"imudp\" port=\"514\")\n\n# provides TCP syslog reception\n#module(load=\"imtcp\")\n#input(type=\"imtcp\" port=\"514\")\n\n# provides kernel logging support and enable non-kernel klog messages\nmodule(load=\"imklog\" permitnonkernelfacility=\"on\")\n\n###########################\n#### GLOBAL DIRECTIVES ####\n###########################\n\n#\n# Use traditional timestamp format.\n# To enable high precision timestamps, comment out the following line.\n#\n$ActionFileDefaultTemplate RSYSLOG_TraditionalFileFormat\n\n# Filter duplicated messages\n$RepeatedMsgReduction on\n\n#\n# Set the default permissions for all log files.\n#\n$FileOwner syslog\n$FileGroup adm\n$FileCreateMode 0640\n$DirCreateMode 0755\n$Umask 0022\n$PrivDropToUser syslog\n$PrivDropToGroup syslog\n\n#\n# Where to place spool and state files\n#\n$WorkDirectory /var/spool/rsyslog\n\n#\n# Include all config files in /etc/rsyslog.d/\n#\n$IncludeConfig /etc/rsyslog.d/*.conf\n",
+        "stderr": "",
+        "timed_out": false,
+        "duration_ms": 37.2
+      },
+      {
+        "command": "for f in /etc/rsyslog.d/*.conf; do [ -f \"$f\" ] && echo \"### $f\" && cat \"$f\"; done 2>/dev/null; true",
+        "exit_code": 0,
+        "stdout": "### /etc/rsyslog.d/20-ufw.conf\n# Log kernel generated UFW log messages to file\n:msg,contains,\"[UFW \" /var/log/ufw.log\n\n# Uncomment the following to stop logging anything that matches the last rule.\n# Doing this will stop logging kernel generated UFW log messages to the file\n# normally containing kern.* messages (eg, /var/log/kern.log)\n#& stop\n### /etc/rsyslog.d/21-cloudinit.conf\n# Log cloudinit generated log messages to file\n:syslogtag, isequal, \"[CLOUDINIT]\" /var/log/cloud-init.log\n\n# comment out the following line to allow CLOUDINIT messages through.\n# Doing so means you'll also get CLOUDINIT messages in /var/log/syslog\n& stop\n### /etc/rsyslog.d/50-default.conf\n#  Default rules for rsyslog.\n#\n#\t\t\tFor more information see rsyslog.conf(5) and /etc/rsyslog.conf\n\n#\n# First some standard log files.  Log by facility.\n#\nauth,authpriv.*\t\t\t/var/log/auth.log\n*.*;auth,authpriv.none\t\t-/var/log/syslog\n#cron.*\t\t\t\t/var/log/cron.log\n#daemon.*\t\t\t-/var/log/daemon.log\nkern.*\t\t\t\t-/var/log/kern.log\n#lpr.*\t\t\t\t-/var/log/lpr.log\nmail.*\t\t\t\t-/var/log/mail.log\n#user.*\t\t\t\t-/var/log/user.log\n\n#\n# Logging for the mail system.  Split it up so that\n# it is easy to write scripts to parse these files.\n#\n#mail.info\t\t\t-/var/log/mail.info\n#mail.warn\t\t\t-/var/log/mail.warn\nmail.err\t\t\t/var/log/mail.err\n\n#\n# Some \"catch-all\" log files.\n#\n#*.=debug;\\\n#\tauth,authpriv.none;\\\n#\tnews.none;mail.none\t-/var/log/debug\n#*.=info;*.=notice;*.=warn;\\\n#\tauth,authpriv.none;\\\n#\tcron,daemon.none;\\\n#\tmail,news.none\t\t-/var/log/messages\n\n#\n# Emergencies are sent to everybody logged in.\n#\n*.emerg\t\t\t\t:omusrmsg:*\n\n#\n# I like to have messages displayed on the console, but only on a virtual\n# console I usually leave idle.\n#\n#daemon,mail.*;\\\n#\tnews.=crit;news.=err;news.=notice;\\\n#\t*.=debug;*.=info;\\\n#\t*.=notice;*.=warn\t/dev/tty8\n",
+        "stderr": "",
+        "timed_out": false,
+        "duration_ms": 39.3
+      },
+      {
+        "command": "systemctl is-active rsyslog 2>&1; true",
+        "exit_code": 0,
+        "stdout": "active\n",
+        "stderr": "",
+        "timed_out": false,
+        "duration_ms": 36.3
+      },
+      {
+        "command": "cat /etc/systemd/journald.conf",
+        "exit_code": 0,
+        "stdout": "#  This file is part of systemd.\n#\n#  systemd is free software; you can redistribute it and/or modify it under the\n#  terms of the GNU Lesser General Public License as published by the Free\n#  Software Foundation; either version 2.1 of the License, or (at your option)\n#  any later version.\n#\n# Entries in this file show the compile time defaults. Local configuration\n# should be created by either modifying this file, or by creating \"drop-ins\" in\n# the journald.conf.d/ subdirectory. The latter is generally recommended.\n# Defaults can be restored by simply deleting this file and all drop-ins.\n#\n# Use 'systemd-analyze cat-config systemd/journald.conf' to display the full config.\n#\n# See journald.conf(5) for details.\n\n[Journal]\n#Storage=auto\n#Compress=yes\n#Seal=yes\n#SplitMode=uid\n#SyncIntervalSec=5m\n#RateLimitIntervalSec=30s\n#RateLimitBurst=10000\n#SystemMaxUse=\n#SystemKeepFree=\n#SystemMaxFileSize=\n#SystemMaxFiles=100\n#RuntimeMaxUse=\n#RuntimeKeepFree=\n#RuntimeMaxFileSize=\n#RuntimeMaxFiles=100\n#MaxRetentionSec=\n#MaxFileSec=1month\n#ForwardToSyslog=yes\n#ForwardToKMsg=no\n#ForwardToConsole=no\n#ForwardToWall=yes\n#TTYPath=/dev/console\n#MaxLevelStore=debug\n#MaxLevelSyslog=debug\n#MaxLevelKMsg=notice\n#MaxLevelConsole=info\n#MaxLevelWall=emerg\n#LineMax=48K\n#ReadKMsg=yes\n#Audit=no\n",
+        "stderr": "",
+        "timed_out": false,
+        "duration_ms": 38.0
+      },
+      {
+        "command": "for f in /etc/systemd/journald.conf.d/*.conf; do [ -f \"$f\" ] && echo \"### $f\" && cat \"$f\"; done 2>/dev/null; true",
+        "exit_code": 0,
+        "stdout": "",
+        "stderr": "",
+        "timed_out": false,
+        "duration_ms": 25.6
+      },
+      {
+        "command": "cat /etc/systemd/journal-upload.conf",
+        "exit_code": 1,
+        "stdout": "",
+        "stderr": "cat: /etc/systemd/journal-upload.conf: No such file or directory\n",
+        "timed_out": false,
+        "duration_ms": 26.8
+      },
+      {
+        "command": "systemctl is-enabled systemd-journal-upload 2>&1; true",
+        "exit_code": 0,
+        "stdout": "Failed to get unit file state for systemd-journal-upload.service: No such file or directory\n",
+        "stderr": "",
+        "timed_out": false,
+        "duration_ms": 36.8
+      }
+    ]
+  },
+  {
+    "source": "ssh_config",
+    "collector_type": "ssh",
+    "target_id": "demo-ubuntu-vagrant",
+    "resource_type": "linux_server",
+    "resource_id": "linux_server:demo-ubuntu-vagrant",
+    "collected_at": "2026-08-27T09:24:40.312446+00:00",
+    "commands": [
+      {
+        "command": "sudo -n sshd -T",
+        "exit_code": 0,
+        "stdout": "port 22\naddressfamily any\nlistenaddress [::]:22\nlistenaddress 0.0.0.0:22\nusepam yes\nlogingracetime 120\nx11displayoffset 10\nmaxauthtries 6\nmaxsessions 10\nclientaliveinterval 0\nclientalivecountmax 3\nstreamlocalbindmask 0177\npermitrootlogin yes\nignorerhosts yes\nignoreuserknownhosts no\nhostbasedauthentication no\nhostbasedusesnamefrompacketonly no\npubkeyauthentication yes\nkerberosauthentication no\nkerberosorlocalpasswd yes\nkerberosticketcleanup yes\ngssapiauthentication no\ngssapicleanupcredentials yes\ngssapikeyexchange no\ngssapistrictacceptorcheck yes\ngssapistorecredentialsonrekey no\ngssapikexalgorithms gss-group14-sha256-,gss-group16-sha512-,gss-nistp256-sha256-,gss-curve25519-sha256-,gss-group14-sha1-,gss-gex-sha1-\npasswordauthentication no\nkbdinteractiveauthentication no\nprintmotd no\nprintlastlog yes\nx11forwarding yes\nx11uselocalhost yes\npermittty yes\npermituserrc yes\nstrictmodes yes\ntcpkeepalive yes\npermitemptypasswords no\ncompression yes\ngatewayports no\nusedns no\nallowtcpforwarding yes\nallowagentforwarding yes\ndisableforwarding no\nallowstreamlocalforwarding yes\nstreamlocalbindunlink no\nfingerprinthash SHA256\nexposeauthinfo no\npidfile /run/sshd.pid\nmodulifile /etc/ssh/moduli\nxauthlocation /usr/bin/xauth\nciphers aes128-cbc,3des-cbc,aes256-cbc,aes128-ctr,aes256-ctr\nmacs hmac-md5,hmac-sha1,hmac-sha2-256\nbanner none\nforcecommand none\nchrootdirectory none\ntrustedusercakeys none\nrevokedkeys none\nsecuritykeyprovider internal\nauthorizedprincipalsfile none\nversionaddendum none\nauthorizedkeyscommand none\nauthorizedkeyscommanduser none\nauthorizedprincipalscommand none\nauthorizedprincipalscommanduser none\nhostkeyagent none\nkexalgorithms diffie-hellman-group14-sha1,curve25519-sha256,curve25519-sha256@libssh.org\ncasignaturealgorithms ssh-ed25519,ecdsa-sha2-nistp256,ecdsa-sha2-nistp384,ecdsa-sha2-nistp521,sk-ssh-ed25519@openssh.com,sk-ecdsa-sha2-nistp256@openssh.com,rsa-sha2-512,rsa-sha2-256\nhostbasedacceptedalgorithms ssh-ed25519-cert-v01@openssh.com,ecdsa-sha2-nistp256-cert-v01@openssh.com,ecdsa-sha2-nistp384-cert-v01@openssh.com,ecdsa-sha2-nistp521-cert-v01@openssh.com,sk-ssh-ed25519-cert-v01@openssh.com,sk-ecdsa-sha2-nistp256-cert-v01@openssh.com,rsa-sha2-512-cert-v01@openssh.com,rsa-sha2-256-cert-v01@openssh.com,ssh-ed25519,ecdsa-sha2-nistp256,ecdsa-sha2-nistp384,ecdsa-sha2-nistp521,sk-ssh-ed25519@openssh.com,sk-ecdsa-sha2-nistp256@openssh.com,rsa-sha2-512,rsa-sha2-256\nhostkeyalgorithms ssh-ed25519-cert-v01@openssh.com,ecdsa-sha2-nistp256-cert-v01@openssh.com,ecdsa-sha2-nistp384-cert-v01@openssh.com,ecdsa-sha2-nistp521-cert-v01@openssh.com,sk-ssh-ed25519-cert-v01@openssh.com,sk-ecdsa-sha2-nistp256-cert-v01@openssh.com,rsa-sha2-512-cert-v01@openssh.com,rsa-sha2-256-cert-v01@openssh.com,ssh-ed25519,ecdsa-sha2-nistp256,ecdsa-sha2-nistp384,ecdsa-sha2-nistp521,sk-ssh-ed25519@openssh.com,sk-ecdsa-sha2-nistp256@openssh.com,rsa-sha2-512,rsa-sha2-256\npubkeyacceptedalgorithms ssh-ed25519-cert-v01@openssh.com,ecdsa-sha2-nistp256-cert-v01@openssh.com,ecdsa-sha2-nistp384-cert-v01@openssh.com,ecdsa-sha2-nistp521-cert-v01@openssh.com,sk-ssh-ed25519-cert-v01@openssh.com,sk-ecdsa-sha2-nistp256-cert-v01@openssh.com,rsa-sha2-512-cert-v01@openssh.com,rsa-sha2-256-cert-v01@openssh.com,ssh-ed25519,ecdsa-sha2-nistp256,ecdsa-sha2-nistp384,ecdsa-sha2-nistp521,sk-ssh-ed25519@openssh.com,sk-ecdsa-sha2-nistp256@openssh.com,rsa-sha2-512,rsa-sha2-256\nloglevel INFO\nsyslogfacility AUTH\nauthorizedkeysfile .ssh/authorized_keys .ssh/authorized_keys2\nhostkey /etc/ssh/ssh_host_rsa_key\nhostkey /etc/ssh/ssh_host_ecdsa_key\nhostkey /etc/ssh/ssh_host_ed25519_key\nacceptenv LANG\nacceptenv LC_*\nauthenticationmethods any\nsubsystem sftp /usr/lib/openssh/sftp-server\nmaxstartups 10:30:100\npersourcemaxstartups none\npersourcenetblocksize 32:128\npermittunnel no\nipqos lowdelay throughput\nrekeylimit 0 0\npermitopen any\npermitlisten any\npermituserenvironment no\npubkeyauthoptions none\n",
+        "stderr": "",
+        "timed_out": false,
+        "duration_ms": 57.5
+      },
+      {
+        "command": "cat /etc/ssh/sshd_config",
+        "exit_code": 0,
+        "stdout": "\n# This is the sshd server system-wide configuration file.  See\n# sshd_config(5) for more information.\n\n# This sshd was compiled with PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games\n\n# The strategy used for options in the default sshd_config shipped with\n# OpenSSH is to specify options with their default value where\n# possible, but leave them commented.  Uncommented options override the\n# default value.\n\nInclude /etc/ssh/sshd_config.d/*.conf\n\n#Port 22\n#AddressFamily any\n#ListenAddress 0.0.0.0\n#ListenAddress ::\n\n#HostKey /etc/ssh/ssh_host_rsa_key\n#HostKey /etc/ssh/ssh_host_ecdsa_key\n#HostKey /etc/ssh/ssh_host_ed25519_key\n\n# Ciphers and keying\n#RekeyLimit default none\n\n# Logging\n#SyslogFacility AUTH\n#LogLevel INFO\n\n# Authentication:\n\n#LoginGraceTime 2m\n#PermitRootLogin prohibit-password\n#StrictModes yes\n#MaxAuthTries 6\n#MaxSessions 10\n\n#PubkeyAuthentication yes\n\n# Expect .ssh/authorized_keys2 to be disregarded by default in future.\n#AuthorizedKeysFile\t.ssh/authorized_keys .ssh/authorized_keys2\n\n#AuthorizedPrincipalsFile none\n\n#AuthorizedKeysCommand none\n#AuthorizedKeysCommandUser nobody\n\n# For this to work you will also need host keys in /etc/ssh/ssh_known_hosts\n#HostbasedAuthentication no\n# Change to yes if you don't trust ~/.ssh/known_hosts for\n# HostbasedAuthentication\n#IgnoreUserKnownHosts no\n# Don't read the user's ~/.rhosts and ~/.shosts files\n#IgnoreRhosts yes\n\n# To disable tunneled clear text passwords, change to no here!\n#PasswordAuthentication yes\n#PermitEmptyPasswords no\n\n# Change to yes to enable challenge-response passwords (beware issues with\n# some PAM modules and threads)\nKbdInteractiveAuthentication no\n\n# Kerberos options\n#KerberosAuthentication no\n#KerberosOrLocalPasswd yes\n#KerberosTicketCleanup yes\n#KerberosGetAFSToken no\n\n# GSSAPI options\n#GSSAPIAuthentication no\n#GSSAPICleanupCredentials yes\n#GSSAPIStrictAcceptorCheck yes\n#GSSAPIKeyExchange no\n\n# Set this to 'yes' to enable PAM authentication, account processing,\n# and session processing. If this is enabled, PAM authentication will\n# be allowed through the KbdInteractiveAuthentication and\n# PasswordAuthentication.  Depending on your PAM configuration,\n# PAM authentication via KbdInteractiveAuthentication may bypass\n# the setting of \"PermitRootLogin without-password\".\n# If you just want the PAM account and session checks to run without\n# PAM authentication, then enable this but set PasswordAuthentication\n# and KbdInteractiveAuthentication to 'no'.\nUsePAM yes\n\n#AllowAgentForwarding yes\n#AllowTcpForwarding yes\n#GatewayPorts no\nX11Forwarding yes\n#X11DisplayOffset 10\n#X11UseLocalhost yes\n#PermitTTY yes\nPrintMotd no\n#PrintLastLog yes\n#TCPKeepAlive yes\n#PermitUserEnvironment no\n#Compression delayed\n#ClientAliveInterval 0\n#ClientAliveCountMax 3\n#UseDNS no\n#PidFile /run/sshd.pid\n#MaxStartups 10:30:100\n#PermitTunnel no\n#ChrootDirectory none\n#VersionAddendum none\n\n# no default banner path\n#Banner none\n\n# Allow client to pass locale environment variables\nAcceptEnv LANG LC_*\n\n# override default of no subsystems\nSubsystem\tsftp\t/usr/lib/openssh/sftp-server\n\n# Example of overriding settings on a per-user basis\n#Match User anoncvs\n#\tX11Forwarding no\n#\tAllowTcpForwarding no\n#\tPermitTTY no\n#\tForceCommand cvs server\n",
+        "stderr": "",
+        "timed_out": false,
+        "duration_ms": 25.1
+      },
+      {
+        "command": "for f in /etc/ssh/sshd_config.d/*.conf; do [ -f \"$f\" ] && echo \"### $f\" && cat \"$f\"; done 2>/dev/null; true",
+        "exit_code": 0,
+        "stdout": "### /etc/ssh/sshd_config.d/60-cloudimg-settings.conf\nPasswordAuthentication no\n### /etc/ssh/sshd_config.d/99-audit-demo.conf\nPermitRootLogin yes\nCiphers aes128-cbc,3des-cbc,aes256-cbc,aes128-ctr,aes256-ctr\nMACs hmac-md5,hmac-sha1,hmac-sha2-256\nKexAlgorithms diffie-hellman-group14-sha1,curve25519-sha256,curve25519-sha256@libssh.org\n",
+        "stderr": "",
+        "timed_out": false,
+        "duration_ms": 35.9
+      },
+      {
+        "command": "ssh -V",
+        "exit_code": 0,
+        "stdout": "",
+        "stderr": "OpenSSH_8.9p1 Ubuntu-3ubuntu0.16, OpenSSL 3.0.2 15 Mar 2022\n",
+        "timed_out": false,
+        "duration_ms": 46.2
+      }
+    ]
+  },
+  {
+    "source": "sudo_config",
+    "collector_type": "ssh",
+    "target_id": "demo-ubuntu-vagrant",
+    "resource_type": "linux_server",
+    "resource_id": "linux_server:demo-ubuntu-vagrant",
+    "collected_at": "2026-08-27T09:24:40.479708+00:00",
+    "commands": [
+      {
+        "command": "sudo -n cat /etc/sudoers",
+        "exit_code": 0,
+        "stdout": "#\n# This file MUST be edited with the 'visudo' command as root.\n#\n# Please consider adding local content in /etc/sudoers.d/ instead of\n# directly modifying this file.\n#\n# See the man page for details on how to write a sudoers file.\n#\nDefaults\tenv_reset\nDefaults\tmail_badpass\nDefaults\tsecure_path=\"/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin\"\nDefaults\tuse_pty\n\n# This preserves proxy settings from user environments of root\n# equivalent users (group sudo)\n#Defaults:%sudo env_keep += \"http_proxy https_proxy ftp_proxy all_proxy no_proxy\"\n\n# This allows running arbitrary commands, but so does ALL, and it means\n# different sudoers have their choice of editor respected.\n#Defaults:%sudo env_keep += \"EDITOR\"\n\n# Completely harmless preservation of a user preference.\n#Defaults:%sudo env_keep += \"GREP_COLOR\"\n\n# While you shouldn't normally run git as root, you need to with etckeeper\n#Defaults:%sudo env_keep += \"GIT_AUTHOR_* GIT_COMMITTER_*\"\n\n# Per-user preferences; root won't have sensible values for them.\n#Defaults:%sudo env_keep += \"EMAIL DEBEMAIL DEBFULLNAME\"\n\n# \"sudo scp\" or \"sudo rsync\" should be able to use your SSH agent.\n#Defaults:%sudo env_keep += \"SSH_AGENT_PID SSH_AUTH_SOCK\"\n\n# Ditto for GPG agent\n#Defaults:%sudo env_keep += \"GPG_AGENT_INFO\"\n\n# Host alias specification\n\n# User alias specification\n\n# Cmnd alias specification\n\n# User privilege specification\nroot\tALL=(ALL:ALL) ALL\n\n# Members of the admin group may gain root privileges\n%admin ALL=(ALL) ALL\n\n# Allow members of group sudo to execute any command\n%sudo\tALL=(ALL:ALL) ALL\n\n# See sudoers(5) for more information on \"@include\" directives:\n\n@includedir /etc/sudoers.d\n",
+        "stderr": "",
+        "timed_out": false,
+        "duration_ms": 36.6
+      },
+      {
+        "command": "sudo -n grep -rhE '^[[:space:]]*Defaults' /etc/sudoers /etc/sudoers.d/ 2>/dev/null; true",
+        "exit_code": 0,
+        "stdout": "Defaults\tenv_reset\nDefaults\tmail_badpass\nDefaults\tsecure_path=\"/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin\"\nDefaults\tuse_pty\nDefaults logfile=\"/var/log/sudo.log\"\n",
+        "stderr": "",
+        "timed_out": false,
+        "duration_ms": 46.6
+      },
+      {
+        "command": "sudo -n ls -l /etc/sudoers.d/",
+        "exit_code": 0,
+        "stdout": "total 20\n-r--r----- 1 root root  139 Aug 27 09:19 90-cloud-init-users\n-r--r----- 1 root root   37 Aug 27 09:24 99-audit-demo-logging\n-r--r----- 1 root root   31 Aug 27 09:24 99-vagrant-nopasswd\n-r--r----- 1 root root 1096 Feb  8  2022 README\n-r--r----- 1 root root   31 Aug 26 11:11 vagrant\n",
+        "stderr": "",
+        "timed_out": false,
+        "duration_ms": 58.2
+      },
+      {
+        "command": "stat -c '%n mode=%a owner=%U group=%G' /var/log/sudo.log 2>&1; true",
+        "exit_code": 0,
+        "stdout": "/var/log/sudo.log mode=640 owner=root group=root\n",
+        "stderr": "",
+        "timed_out": false,
+        "duration_ms": 25.8
+      }
+    ]
+  },
+  {
+    "source": "sysctl",
+    "collector_type": "ssh",
+    "target_id": "demo-ubuntu-vagrant",
+    "resource_type": "linux_server",
+    "resource_id": "linux_server:demo-ubuntu-vagrant",
+    "collected_at": "2026-08-27T09:24:40.685100+00:00",
+    "commands": [
+      {
+        "command": "sysctl net.ipv4.ip_forward net.ipv6.conf.all.forwarding net.ipv4.conf.all.accept_redirects net.ipv4.conf.default.accept_redirects net.ipv4.conf.all.secure_redirects net.ipv4.conf.default.secure_redirects net.ipv6.conf.all.accept_redirects net.ipv6.conf.default.accept_redirects fs.suid_dumpable 2>&1; true",
+        "exit_code": 0,
+        "stdout": "net.ipv4.ip_forward = 1\nnet.ipv6.conf.all.forwarding = 1\nnet.ipv4.conf.all.accept_redirects = 0\nnet.ipv4.conf.default.accept_redirects = 0\nnet.ipv4.conf.all.secure_redirects = 0\nnet.ipv4.conf.default.secure_redirects = 0\nnet.ipv6.conf.all.accept_redirects = 0\nnet.ipv6.conf.default.accept_redirects = 0\nfs.suid_dumpable = 2\n",
+        "stderr": "",
+        "timed_out": false,
+        "duration_ms": 37.5
+      },
+      {
+        "command": "cat /etc/sysctl.conf",
+        "exit_code": 0,
+        "stdout": "#\n# /etc/sysctl.conf - Configuration file for setting system variables\n# See /etc/sysctl.d/ for additional system variables.\n# See sysctl.conf (5) for information.\n#\n\n#kernel.domainname = example.com\n\n# Uncomment the following to stop low-level messages on console\n#kernel.printk = 3 4 1 3\n\n###################################################################\n# Functions previously found in netbase\n#\n\n# Uncomment the next two lines to enable Spoof protection (reverse-path filter)\n# Turn on Source Address Verification in all interfaces to\n# prevent some spoofing attacks\n#net.ipv4.conf.default.rp_filter=1\n#net.ipv4.conf.all.rp_filter=1\n\n# Uncomment the next line to enable TCP/IP SYN cookies\n# See http://lwn.net/Articles/277146/\n# Note: This may impact IPv6 TCP sessions too\n#net.ipv4.tcp_syncookies=1\n\n# Uncomment the next line to enable packet forwarding for IPv4\n#net.ipv4.ip_forward=1\n\n# Uncomment the next line to enable packet forwarding for IPv6\n#  Enabling this option disables Stateless Address Autoconfiguration\n#  based on Router Advertisements for this host\n#net.ipv6.conf.all.forwarding=1\n\n\n###################################################################\n# Additional settings - these settings can improve the network\n# security of the host and prevent against some network attacks\n# including spoofing attacks and man in the middle attacks through\n# redirection. Some network environments, however, require that these\n# settings are disabled so review and enable them as needed.\n#\n# Do not accept ICMP redirects (prevent MITM attacks)\n#net.ipv4.conf.all.accept_redirects = 0\n#net.ipv6.conf.all.accept_redirects = 0\n# _or_\n# Accept ICMP redirects only for gateways listed in our default\n# gateway list (enabled by default)\n# net.ipv4.conf.all.secure_redirects = 1\n#\n# Do not send ICMP redirects (we are not a router)\n#net.ipv4.conf.all.send_redirects = 0\n#\n# Do not accept IP source route packets (we are not a router)\n#net.ipv4.conf.all.accept_source_route = 0\n#net.ipv6.conf.all.accept_source_route = 0\n#\n# Log Martian Packets\n#net.ipv4.conf.all.log_martians = 1\n#\n\n###################################################################\n# Magic system request Key\n# 0=disable, 1=enable all, >1 bitmask of sysrq functions\n# See https://www.kernel.org/doc/html/latest/admin-guide/sysrq.html\n# for what other values do\n#kernel.sysrq=438\n\n",
+        "stderr": "",
+        "timed_out": false,
+        "duration_ms": 24.9
+      },
+      {
+        "command": "for f in /etc/sysctl.d/*.conf; do [ -f \"$f\" ] && echo \"### $f\" && cat \"$f\"; done 2>/dev/null; true",
+        "exit_code": 0,
+        "stdout": "### /etc/sysctl.d/10-console-messages.conf\n\n# the following stops low-level messages on console\nkernel.printk = 4 4 1 7\n### /etc/sysctl.d/10-ipv6-privacy.conf\n# IPv6 Privacy Extensions (RFC 4941)\n# ---\n# IPv6 typically uses a device's MAC address when choosing an IPv6 address\n# to use in autoconfiguration. Privacy extensions allow using a randomly\n# generated IPv6 address, which increases privacy.\n#\n# Acceptable values:\n#    0 - don\u00e2\u20ac\u2122t use privacy extensions.\n#    1 - generate privacy addresses\n#    2 - prefer privacy addresses and use them over the normal addresses.\nnet.ipv6.conf.all.use_tempaddr = 2\nnet.ipv6.conf.default.use_tempaddr = 2\n### /etc/sysctl.d/10-kernel-hardening.conf\n# These settings are specific to hardening the kernel itself from attack\n# from userspace, rather than protecting userspace from other malicious\n# userspace things.\n#\n#\n# When an attacker is trying to exploit the local kernel, it is often\n# helpful to be able to examine where in memory the kernel, modules,\n# and data structures live. As such, kernel addresses should be treated\n# as sensitive information.\n#\n# Many files and interfaces contain these addresses (e.g. /proc/kallsyms,\n# /proc/modules, etc), and this setting can censor the addresses. A value\n# of \"0\" allows all users to see the kernel addresses. A value of \"1\"\n# limits visibility to the root user, and \"2\" blocks even the root user.\nkernel.kptr_restrict = 1\n\n# Access to the kernel log buffer can be especially useful for an attacker\n# attempting to exploit the local kernel, as kernel addresses and detailed\n# call traces are frequently found in kernel oops messages. Setting\n# dmesg_restrict to \"0\" allows all users to view the kernel log buffer,\n# and setting it to \"1\" restricts access to those with CAP_SYSLOG.\n#\n# dmesg_restrict defaults to 1 via CONFIG_SECURITY_DMESG_RESTRICT, only\n# uncomment the following line to disable.\n# kernel.dmesg_restrict = 0\n### /etc/sysctl.d/10-magic-sysrq.conf\n# The magic SysRq key enables certain keyboard combinations to be\n# interpreted by the kernel to help with debugging. The kernel will respond\n# to these keys regardless of the current running applications.\n#\n# In general, the magic SysRq key is not needed for the average Ubuntu\n# system, and having it enabled by default can lead to security issues on\n# the console such as being able to dump memory or to kill arbitrary\n# processes including the running screen lock.\n#\n# Here is the list of possible values:\n#   0 - disable sysrq completely\n#   1 - enable all functions of sysrq\n#  >1 - enable certain functions by adding up the following values:\n#          2 - enable control of console logging level\n#          4 - enable control of keyboard (SAK, unraw)\n#          8 - enable debugging dumps of processes etc.\n#         16 - enable sync command\n#         32 - enable remount read-only\n#         64 - enable signalling of processes (term, kill, oom-kill)\n#        128 - allow reboot/poweroff\n#        256 - allow nicing of all RT tasks\n#\n#   For example, to enable both control of console logging level and\n#   debugging dumps of processes: kernel.sysrq = 10\n#\nkernel.sysrq = 176\n### /etc/sysctl.d/10-network-security.conf\n\n# Turn on Source Address Verification in all interfaces to\n# prevent some spoofing attacks.\nnet.ipv4.conf.default.rp_filter=2\nnet.ipv4.conf.all.rp_filter=2\n\n### /etc/sysctl.d/10-ptrace.conf\n# The PTRACE system is used for debugging.  With it, a single user process\n# can attach to any other dumpable process owned by the same user.  In the\n# case of malicious software, it is possible to use PTRACE to access\n# credentials that exist in memory (re-using existing SSH connections,\n# extracting GPG agent information, etc).\n#\n# A PTRACE scope of \"0\" is the more permissive mode.  A scope of \"1\" limits\n# PTRACE only to direct child processes (e.g. \"gdb name-of-program\" and\n# \"strace -f name-of-program\" work, but gdb's \"attach\" and \"strace -fp $PID\"\n# do not).  The PTRACE scope is ignored when a user has CAP_SYS_PTRACE, so\n# \"sudo strace -fp $PID\" will work as before.  For more details see:\n# https://wiki.ubuntu.com/SecurityTeam/Roadmap/KernelHardening#ptrace\n#\n# For applications launching crash handlers that need PTRACE, exceptions can\n# be registered by the debugee by declaring in the segfault handler\n# specifically which process will be using PTRACE on the debugee:\n#   prctl(PR_SET_PTRACER, debugger_pid, 0, 0, 0);\n#\n# In general, PTRACE is not needed for the average running Ubuntu system.\n# To that end, the default is to set the PTRACE scope to \"1\".  This value\n# may not be appropriate for developers or servers with only admin accounts.\nkernel.yama.ptrace_scope = 1\n### /etc/sysctl.d/10-zeropage.conf\n# Protect the zero page of memory from userspace mmap to prevent kernel\n# NULL-dereference attacks against potential future kernel security\n# vulnerabilities.  (Added in kernel 2.6.23.)\n#\n# While this default is built into the Ubuntu kernel, there is no way to\n# restore the kernel default if the value is changed during runtime; for\n# example via package removal (e.g. wine, dosemu).  Therefore, this value\n# is reset to the secure default each time the sysctl values are loaded.\nvm.mmap_min_addr = 65536\n### /etc/sysctl.d/99-audit-demo.conf\n# CIS-3.2.1 -- intentionally non-compliant\nnet.ipv4.ip_forward = 1\nnet.ipv6.conf.all.forwarding = 1\n\n# CIS-3.3.1 -- intentionally compliant\nnet.ipv4.conf.all.accept_redirects = 0\nnet.ipv4.conf.default.accept_redirects = 0\nnet.ipv4.conf.all.secure_redirects = 0\nnet.ipv4.conf.default.secure_redirects = 0\nnet.ipv6.conf.all.accept_redirects = 0\nnet.ipv6.conf.default.accept_redirects = 0\nfs.suid_dumpable = 2\n### /etc/sysctl.d/99-cloudimg-ipv6.conf\n# Written by the Cloud Image build process\n# See https://bugs.launchpad.net/ubuntu/+source/procps/+bug/1068756\nnet.ipv6.conf.all.use_tempaddr = 0\nnet.ipv6.conf.default.use_tempaddr = 0\n### /etc/sysctl.d/99-sysctl.conf\n#\n# /etc/sysctl.conf - Configuration file for setting system variables\n# See /etc/sysctl.d/ for additional system variables.\n# See sysctl.conf (5) for information.\n#\n\n#kernel.domainname = example.com\n\n# Uncomment the following to stop low-level messages on console\n#kernel.printk = 3 4 1 3\n\n###################################################################\n# Functions previously found in netbase\n#\n\n# Uncomment the next two lines to enable Spoof protection (reverse-path filter)\n# Turn on Source Address Verification in all interfaces to\n# prevent some spoofing attacks\n#net.ipv4.conf.default.rp_filter=1\n#net.ipv4.conf.all.rp_filter=1\n\n# Uncomment the next line to enable TCP/IP SYN cookies\n# See http://lwn.net/Articles/277146/\n# Note: This may impact IPv6 TCP sessions too\n#net.ipv4.tcp_syncookies=1\n\n# Uncomment the next line to enable packet forwarding for IPv4\n#net.ipv4.ip_forward=1\n\n# Uncomment the next line to enable packet forwarding for IPv6\n#  Enabling this option disables Stateless Address Autoconfiguration\n#  based on Router Advertisements for this host\n#net.ipv6.conf.all.forwarding=1\n\n\n###################################################################\n# Additional settings - these settings can improve the network\n# security of the host and prevent against some network attacks\n# including spoofing attacks and man in the middle attacks through\n# redirection. Some network environments, however, require that these\n# settings are disabled so review and enable them as needed.\n#\n# Do not accept ICMP redirects (prevent MITM attacks)\n#net.ipv4.conf.all.accept_redirects = 0\n#net.ipv6.conf.all.accept_redirects = 0\n# _or_\n# Accept ICMP redirects only for gateways listed in our default\n# gateway list (enabled by default)\n# net.ipv4.conf.all.secure_redirects = 1\n#\n# Do not send ICMP redirects (we are not a router)\n#net.ipv4.conf.all.send_redirects = 0\n#\n# Do not accept IP source route packets (we are not a router)\n#net.ipv4.conf.all.accept_source_route = 0\n#net.ipv6.conf.all.accept_source_route = 0\n#\n# Log Martian Packets\n#net.ipv4.conf.all.log_martians = 1\n#\n\n###################################################################\n# Magic system request Key\n# 0=disable, 1=enable all, >1 bitmask of sysrq functions\n# See https://www.kernel.org/doc/html/latest/admin-guide/sysrq.html\n# for what other values do\n#kernel.sysrq=438\n\n",
+        "stderr": "",
+        "timed_out": false,
+        "duration_ms": 79.7
+      },
+      {
+        "command": "for f in /usr/lib/sysctl.d/*.conf; do [ -f \"$f\" ] && echo \"### $f\" && cat \"$f\"; done 2>/dev/null; true",
+        "exit_code": 0,
+        "stdout": "### /usr/lib/sysctl.d/50-default.conf\n#  This file is part of systemd.\n#\n#  systemd is free software; you can redistribute it and/or modify it\n#  under the terms of the GNU Lesser General Public License as published by\n#  the Free Software Foundation; either version 2.1 of the License, or\n#  (at your option) any later version.\n\n# See sysctl.d(5) and core(5) for documentation.\n\n# To override settings in this file, create a local file in /etc\n# (e.g. /etc/sysctl.d/90-override.conf), and put any assignments\n# there.\n\n# System Request functionality of the kernel (SYNC)\n#\n# Use kernel.sysrq = 1 to allow all keys.\n# See https://www.kernel.org/doc/html/latest/admin-guide/sysrq.html for a list\n# of values and keys.\n#kernel.sysrq = 16 # Ubuntu uses /etc/sysctl.d/10-magic-sysrq.conf\n\n# Append the PID to the core filename\nkernel.core_uses_pid = 1\n\n# Source route verification\nnet.ipv4.conf.default.rp_filter = 2\nnet.ipv4.conf.*.rp_filter = 2\n#-net.ipv4.conf.all.rp_filter # Ubuntu uses /etc/sysctl.d/10-network-security.conf\n\n# Do not accept source routing\nnet.ipv4.conf.default.accept_source_route = 0\nnet.ipv4.conf.*.accept_source_route = 0\n-net.ipv4.conf.all.accept_source_route\n\n# Promote secondary addresses when the primary address is removed\nnet.ipv4.conf.default.promote_secondaries = 1\nnet.ipv4.conf.*.promote_secondaries = 1\n-net.ipv4.conf.all.promote_secondaries\n\n# ping(8) without CAP_NET_ADMIN and CAP_NET_RAW\n# The upper limit is set to 2^31-1. Values greater than that get rejected by\n# the kernel because of this definition in linux/include/net/ping.h:\n#   #define GID_T_MAX (((gid_t)~0U) >> 1)\n# That's not so bad because values between 2^31 and 2^32-1 are reserved on\n# systemd-based systems anyway: https://systemd.io/UIDS-GIDS#summary\n-net.ipv4.ping_group_range = 0 2147483647\n\n# Fair Queue CoDel packet scheduler to fight bufferbloat\n-net.core.default_qdisc = fq_codel\n\n# Enable hard and soft link protection\nfs.protected_hardlinks = 1\nfs.protected_symlinks = 1\n\n# Enable regular file and FIFO protection\nfs.protected_regular = 1\nfs.protected_fifos = 1\n### /usr/lib/sysctl.d/50-pid-max.conf\n#  This file is part of systemd.\n#\n#  systemd is free software; you can redistribute it and/or modify it\n#  under the terms of the GNU Lesser General Public License as published by\n#  the Free Software Foundation; either version 2.1 of the License, or\n#  (at your option) any later version.\n\n# See sysctl.d(5) and core(5) for documentation.\n\n# To override settings in this file, create a local file in /etc\n# (e.g. /etc/sysctl.d/90-override.conf), and put any assignments\n# there.\n\n# Bump the numeric PID range to its maximum of 2^22 (from the in-kernel default\n# of 2^16), to make PID collisions less likely.\nkernel.pid_max = 4194304\n### /usr/lib/sysctl.d/99-protect-links.conf\n###################################################################\n# Protected links\n#\n# Protects against creating or following links under certain conditions\n# Debian kernels have both set to 1 (restricted) \n# See https://www.kernel.org/doc/Documentation/sysctl/fs.txt\nfs.protected_fifos = 1\nfs.protected_hardlinks = 1\nfs.protected_regular = 2\nfs.protected_symlinks = 1\n",
+        "stderr": "",
+        "timed_out": false,
+        "duration_ms": 36.7
+      },
+      {
+        "command": "for f in /run/sysctl.d/*.conf; do [ -f \"$f\" ] && echo \"### $f\" && cat \"$f\"; done 2>/dev/null; true",
+        "exit_code": 0,
+        "stdout": "",
+        "stderr": "",
+        "timed_out": false,
+        "duration_ms": 26.6
+      }
+    ]
+  },
+  {
+    "source": "unattended_upgrades",
+    "collector_type": "ssh",
+    "target_id": "demo-ubuntu-vagrant",
+    "resource_type": "linux_server",
+    "resource_id": "linux_server:demo-ubuntu-vagrant",
+    "collected_at": "2026-08-27T09:24:40.873923+00:00",
+    "commands": [
+      {
+        "command": "dpkg-query -W -f='${Package} ${Status} ${Version}\\n' unattended-upgrades",
+        "exit_code": 0,
+        "stdout": "unattended-upgrades install ok installed 2.8ubuntu1\n",
+        "stderr": "",
+        "timed_out": false,
+        "duration_ms": 37.2
+      },
+      {
+        "command": "cat /etc/apt/apt.conf.d/20auto-upgrades",
+        "exit_code": 0,
+        "stdout": "APT::Periodic::Update-Package-Lists \"0\";\nAPT::Periodic::Unattended-Upgrade \"0\";\n",
+        "stderr": "",
+        "timed_out": false,
+        "duration_ms": 16.3
+      },
+      {
+        "command": "cat /etc/apt/apt.conf.d/50unattended-upgrades",
+        "exit_code": 0,
+        "stdout": "// Automatically upgrade packages from these (origin:archive) pairs\n//\n// Note that in Ubuntu security updates may pull in new dependencies\n// from non-security sources (e.g. chromium). By allowing the release\n// pocket these get automatically pulled in.\nUnattended-Upgrade::Allowed-Origins {\n\t\"${distro_id}:${distro_codename}\";\n\t\"${distro_id}:${distro_codename}-security\";\n\t// Extended Security Maintenance; doesn't necessarily exist for\n\t// every release and this system may not have it installed, but if\n\t// available, the policy for updates is such that unattended-upgrades\n\t// should also install from here by default.\n\t\"${distro_id}ESMApps:${distro_codename}-apps-security\";\n\t\"${distro_id}ESM:${distro_codename}-infra-security\";\n//\t\"${distro_id}:${distro_codename}-updates\";\n//\t\"${distro_id}:${distro_codename}-proposed\";\n//\t\"${distro_id}:${distro_codename}-backports\";\n};\n\n// Python regular expressions, matching packages to exclude from upgrading\nUnattended-Upgrade::Package-Blacklist {\n    // The following matches all packages starting with linux-\n//  \"linux-\";\n\n    // Use $ to explicitely define the end of a package name. Without\n    // the $, \"libc6\" would match all of them.\n//  \"libc6$\";\n//  \"libc6-dev$\";\n//  \"libc6-i686$\";\n\n    // Special characters need escaping\n//  \"libstdc\\+\\+6$\";\n\n    // The following matches packages like xen-system-amd64, xen-utils-4.1,\n    // xenstore-utils and libxenstore3.0\n//  \"(lib)?xen(store)?\";\n\n    // For more information about Python regular expressions, see\n    // https://docs.python.org/3/howto/regex.html\n};\n\n// This option controls whether the development release of Ubuntu will be\n// upgraded automatically. Valid values are \"true\", \"false\", and \"auto\".\nUnattended-Upgrade::DevRelease \"auto\";\n\n// This option allows you to control if on a unclean dpkg exit\n// unattended-upgrades will automatically run \n//   dpkg --force-confold --configure -a\n// The default is true, to ensure updates keep getting installed\n//Unattended-Upgrade::AutoFixInterruptedDpkg \"true\";\n\n// Split the upgrade into the smallest possible chunks so that\n// they can be interrupted with SIGTERM. This makes the upgrade\n// a bit slower but it has the benefit that shutdown while a upgrade\n// is running is possible (with a small delay)\n//Unattended-Upgrade::MinimalSteps \"true\";\n\n// Install all updates when the machine is shutting down\n// instead of doing it in the background while the machine is running.\n// This will (obviously) make shutdown slower.\n// Unattended-upgrades increases logind's InhibitDelayMaxSec to 30s.\n// This allows more time for unattended-upgrades to shut down gracefully\n// or even install a few packages in InstallOnShutdown mode, but is still a\n// big step back from the 30 minutes allowed for InstallOnShutdown previously.\n// Users enabling InstallOnShutdown mode are advised to increase\n// InhibitDelayMaxSec even further, possibly to 30 minutes.\n//Unattended-Upgrade::InstallOnShutdown \"false\";\n\n// Send email to this address for problems or packages upgrades\n// If empty or unset then no email is sent, make sure that you\n// have a working mail setup on your system. A package that provides\n// 'mailx' must be installed. E.g. \"user@example.com\"\n//Unattended-Upgrade::Mail \"\";\n\n// Set this value to one of:\n//    \"always\", \"only-on-error\" or \"on-change\"\n// If this is not set, then any legacy MailOnlyOnError (boolean) value\n// is used to chose between \"only-on-error\" and \"on-change\"\n//Unattended-Upgrade::MailReport \"on-change\";\n\n// Remove unused automatically installed kernel-related packages\n// (kernel images, kernel headers and kernel version locked tools).\n//Unattended-Upgrade::Remove-Unused-Kernel-Packages \"true\";\n\n// Do automatic removal of newly unused dependencies after the upgrade\n//Unattended-Upgrade::Remove-New-Unused-Dependencies \"true\";\n\n// Do automatic removal of unused packages after the upgrade\n// (equivalent to apt-get autoremove)\n//Unattended-Upgrade::Remove-Unused-Dependencies \"false\";\n\n// Automatically reboot *WITHOUT CONFIRMATION* if\n//  the file /var/run/reboot-required is found after the upgrade\n//Unattended-Upgrade::Automatic-Reboot \"false\";\n\n// Automatically reboot even if there are users currently logged in\n// when Unattended-Upgrade::Automatic-Reboot is set to true\n//Unattended-Upgrade::Automatic-Reboot-WithUsers \"true\";\n\n// If automatic reboot is enabled and needed, reboot at the specific\n// time instead of immediately\n//  Default: \"now\"\n//Unattended-Upgrade::Automatic-Reboot-Time \"02:00\";\n\n// Use apt bandwidth limit feature, this example limits the download\n// speed to 70kb/sec\n//Acquire::http::Dl-Limit \"70\";\n\n// Enable logging to syslog. Default is False\n// Unattended-Upgrade::SyslogEnable \"false\";\n\n// Specify syslog facility. Default is daemon\n// Unattended-Upgrade::SyslogFacility \"daemon\";\n\n// Download and install upgrades only on AC power\n// (i.e. skip or gracefully stop updates on battery)\n// Unattended-Upgrade::OnlyOnACPower \"true\";\n\n// Download and install upgrades only on non-metered connection\n// (i.e. skip or gracefully stop updates on a metered connection)\n// Unattended-Upgrade::Skip-Updates-On-Metered-Connections \"true\";\n\n// Verbose logging\n// Unattended-Upgrade::Verbose \"false\";\n\n// Print debugging information both in unattended-upgrades and\n// in unattended-upgrade-shutdown\n// Unattended-Upgrade::Debug \"false\";\n\n// Allow package downgrade if Pin-Priority exceeds 1000\n// Unattended-Upgrade::Allow-downgrade \"false\";\n\n// When APT fails to mark a package to be upgraded or installed try adjusting\n// candidates of related packages to help APT's resolver in finding a solution\n// where the package can be upgraded or installed.\n// This is a workaround until APT's resolver is fixed to always find a\n// solution if it exists. (See Debian bug #711128.)\n// The fallback is enabled by default, except on Debian's sid release because\n// uninstallable packages are frequent there.\n// Disabling the fallback speeds up unattended-upgrades when there are\n// uninstallable packages at the expense of rarely keeping back packages which\n// could be upgraded or installed.\n// Unattended-Upgrade::Allow-APT-Mark-Fallback \"true\";\n",
+        "stderr": "",
+        "timed_out": false,
+        "duration_ms": 25.7
+      },
+      {
+        "command": "apt-config dump APT::Periodic 2>&1; true",
+        "exit_code": 0,
+        "stdout": "APT::Periodic \"\";\nAPT::Periodic::Update-Package-Lists \"0\";\nAPT::Periodic::Download-Upgradeable-Packages \"0\";\nAPT::Periodic::AutocleanInterval \"0\";\nAPT::Periodic::Unattended-Upgrade \"0\";\n",
+        "stderr": "",
+        "timed_out": false,
+        "duration_ms": 37.1
+      },
+      {
+        "command": "systemctl is-enabled unattended-upgrades 2>&1; true",
+        "exit_code": 0,
+        "stdout": "disabled\n",
+        "stderr": "",
+        "timed_out": false,
+        "duration_ms": 37.2
+      },
+      {
+        "command": "systemctl is-active unattended-upgrades 2>&1; true",
+        "exit_code": 0,
+        "stdout": "inactive\n",
+        "stderr": "",
+        "timed_out": false,
+        "duration_ms": 35.1
+      }
+    ]
+  }
+]

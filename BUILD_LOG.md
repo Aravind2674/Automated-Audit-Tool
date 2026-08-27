@@ -8,10 +8,12 @@ verified and how, and every deviation from spec.
 ## Phase 1 — Control library + minimal SSH collector (raw output only)
 
 **Date:** 2026-08-27
-**Status:** ⚠️ **PARTIALLY COMPLETE — acceptance criteria NOT fully met.**
-Criterion 1 (all 18 YAMLs load without schema errors) is met with evidence.
-Criterion 2 (collector returns real raw output from the demo VM) is **blocked** —
-Vagrant and VirtualBox are not installed on this machine.
+**Status:** ✅ **COMPLETE — both acceptance criteria met with evidence.**
+Criterion 1 (all 18 YAMLs load without schema errors): met.
+Criterion 2 (collector returns real raw output from the demo VM): met — 14/14 sources,
+66/66 commands executed against the live Vagrant VM, independently cross-checked.
+*(The blocked status recorded here earlier was resolved once VirtualBox and Vagrant
+were installed; see Addendum 2 and Addendum 4.)*
 
 ### Environment verified before starting (Section 10)
 
@@ -227,6 +229,110 @@ Section 11's list". `CLAUDE.md` is unchanged at 395 lines, sha256 `2bae871d4337�
 and its section headings stop at `## 10. Missing tool policy`. The `.gitignore`
 contents above are therefore **my own judgement, not a spec list**, and should be
 reviewed against the intended Section 11 once it exists.
+
+### Addendum 4 — 2026-08-27, Criterion 2 met
+
+**Demo VM.** `vagrant up` completed (exit 0). Box `ubuntu/jammy64` v20241002.0.0,
+VirtualBox provider, NAT 22→2222 plus host-only adapter. `provision.sh` ran to
+completion and reported all 18 controls configured — 4 to pass, 14 to fail.
+
+**Incident: the intentional misconfiguration locked the collector out.** The first
+real collection attempt failed with `IncompatiblePeer: no acceptable kex algorithm`.
+Diagnosed rather than worked around:
+
+```
+VM sshd offered : diffie-hellman-group14-sha1, curve25519-sha256
+Paramiko 5.0.0  : curve25519-sha256@libssh.org, ecdh-sha2-nistp{256,384,521},
+                  diffie-hellman-group16-sha512, diffie-hellman-group-exchange-sha256,
+                  diffie-hellman-group14-sha256
+                -> no algorithm in common
+```
+
+`curve25519-sha256` and `curve25519-sha256@libssh.org` are the same algorithm; RFC
+8731 standardised the plain name after OpenSSH had shipped the vendor-suffixed one,
+and Paramiko 5.0.0's `_preferred_kex` lists only the vendor spelling. `provision.sh`
+had pinned the VM to the plain name alone, which no real OpenSSH host does — real
+hosts offer both. Fixed in `provision.sh` by offering both spellings, which makes the
+demo target *more* realistic rather than less. CIS-5.2.11 still fails as designed:
+`diffie-hellman-group14-sha1`, CBC ciphers and `hmac-md5`/`hmac-sha1` all remain on
+offer.
+
+> **Carried finding for `architecture.md` and the demo Q&A.** This is not just a
+> provisioning typo — it is a real limitation of the tool. Paramiko 5.0.0 has dropped
+> SHA-1 key exchange entirely, so this collector **cannot connect to genuinely legacy
+> SSH hosts** — which are disproportionately the hosts most in need of auditing. An
+> audit tool that silently cannot reach its worst-configured targets reports a
+> falsely clean estate. Options to evaluate later: pin an older Paramiko for a
+> "legacy" connection profile, widen `Transport._preferred_kex` explicitly at the
+> collector, or shell out to the system `ssh` client as a fallback transport. Not in
+> scope for Phase 1; must not be forgotten.
+
+**Collection result.**
+
+```
+sources collected : 14/14
+commands run      : 66  (60 exit=0, 6 non-zero/timeout)
+raw output written: phase1_raw_output.json
+```
+
+The 6 non-zero exits are expected evidence, not failures — e.g. `cat
+/etc/audit/auditd.conf` returning 1 because auditd was purged is exactly the finding
+CIS-4.1.1 depends on.
+
+**Rule 8 self-verification (spec Section 9).** `tests/crosscheck_phase1.py` re-ran
+each control's primary evidence command over a **fresh SSH connection**, opened
+separately from the collector's, and diffed exit code and stdout bytes against
+`phase1_raw_output.json`. 7 controls spanning 7 different collector sources:
+
+```
+PASS  CIS-1.4.2   PASS  CIS-1.6.1   PASS  CIS-3.2.1   PASS  CIS-4.1.1
+PASS  CIS-5.2.10  PASS  CIS-5.3.1   PASS  CIS-6.1.1
+cross-checked: 7   matched: 7   mismatched: 0
+```
+
+**Evidence sanity check.** Separately from the byte-diff, the collected evidence was
+checked to contain the 10 specific states `provision.sh` was written to create
+(`permitrootlogin yes`, `/etc/shadow mode=644`, `/etc/passwd mode=644 owner=root`,
+`ip_forward = 1`, `accept_redirects = 0`, `minlen = 8`, `PASS_MAX_DAYS 99999`, auditd
+absent, sudo `logfile=`, cramfs `install /bin/false`). 10/10 found. This matters
+because a byte-identical diff proves only that the collector is *reproducible* — this
+proves it is *reading the right thing*.
+
+**`EXPECTED_POSTURE.md` is now partially verified.** 10 of its 18 rows are confirmed
+against the live VM by the check above; its "not yet confirmed" header is accordingly
+narrowed, not removed. The remaining 8 rows are confirmed during Phase 2 evaluation.
+
+### Addendum 5 — 2026-08-27, Section 11 reconciliation
+
+`CLAUDE.md` was updated by the project owner to add Section 11 (Portability & team
+setup). The source-control work in Addendum 3 was done before it existed, so it was
+checked against Section 11 rather than redone.
+
+**Already compliant, no changes made:** all 11 of Section 11's minimum `.gitignore`
+entries (`venv/`, `__pycache__/`, `node_modules/`, `.next/`, `.vagrant/`, `*.box`,
+`.env`, `.DS_Store`, `Thumbs.db`, `.vscode/`, `.idea/`) were already present;
+`README.md` already met the clone-to-running requirement with commands pulled from
+this log; `CLAUDE.md` is at repo root and committed; `.env.example` exists with each
+contributor generating their own `SECRETS_KEY`.
+
+**One conflict, corrected:** Addendum 3's `.gitignore` excluded
+`phase1_raw_output.json`, `*_raw_output.json`, `evidence/` and `*.log` on the
+reasoning that collected evidence should stay out of source control. Section 11 says
+the opposite — small evidence artifacts are part of the audit trail this project
+exists to produce and are fine to commit. Those four patterns were removed. The
+residual concern is recorded as a comment in `.gitignore` rather than as an ignore
+rule: harmless for the throwaway demo VM, but evidence collected from a real
+production host is a map of that host's weaknesses and warrants a deliberate decision
+before it lands in a shared repo.
+
+**⚠️ File integrity discrepancy — unresolved.** The project owner specified
+`CLAUDE.md` should be sha256 `d084b80d137b6145…` at 440 lines. The file on disk is
+sha256 `46d87a94abdd9626…` at **417 lines** — 23 lines short. Section 11's content is
+present but rendered as `**11. Portability & team setup**` (bold) rather than a
+`## 11.` heading, and the whole file now carries backslash-escaped markdown
+(`## 1\. Stack`, `SECRETS\_KEY`), consistent with a paste that round-tripped through
+a rich-text editor. The Section 11 text that *is* present was acted on in full. The
+owner should confirm nothing further was truncated.
 
 ### Open items carried into Phase 2
 
