@@ -1552,6 +1552,104 @@ looked fine in any manual check.
   requires `mode="live"`), which was previously deferred precisely because a
   50-target request was the one guaranteed to time out.
 
+### Addendum — one-click demo launcher (`start_audit_tool.bat` / `stop_audit_tool.bat`)
+
+Two Windows batch scripts at repo root so the demo starts from a double-click.
+
+**start_audit_tool.bat** — checks the `postgresql-x64-17` service and attempts
+`net start` if it is stopped; refuses to spawn duplicates if the ports are taken;
+builds the frontend when no production build exists; launches API and dashboard as
+separate minimised windows; **polls until each actually answers** before opening the
+browser. Nothing sleeps a fixed interval and hopes.
+
+**stop_audit_tool.bat** — stops both by listening port (not by PID file, which goes
+stale and can kill whatever inherited the number), verifies the ports are clear, and
+**leaves PostgreSQL running**: it is a shared Windows service and not this
+application's to stop.
+
+#### Verified end to end, from a clean baseline
+
+```
+BASELINE : no uvicorn/next processes, ports 8000+3000 free, PostgreSQL Running
+
+START    [1/4] PostgreSQL service (postgresql-x64-17)... already running.
+         [2/4] Checking ports 8000 and 3000...        both free.
+         [3/4] Starting backend and frontend...
+         [4/4] Waiting for services to come up...
+               API ready on port 8000.
+               Dashboard ready on port 3000.
+         Ready. Opening http://localhost:3000
+         exit code 0
+
+VERIFY   :8000 -> HTTP 200   :3000 -> HTTP 200   <title>IT Systems Audit Tool</title>
+         compliance 16.7% | 54 results | 6 domains | 29 trend runs | 8 exceptions
+         DATA-POPULATED: YES
+
+ALREADY-RUNNING PATH (second launch while up)
+         "The audit tool appears to be running already.
+          Opening the browser instead of starting a second copy."
+         service processes before: 3   after: 3   -> no duplicates
+
+STOP     Stopping API [uvicorn] on port 8000 (PID 22320)...      stopped.
+         Stopping Dashboard [next] on port 3000 (PID 16660)...   stopped.
+         Ports 8000 and 3000 are clear.
+         PostgreSQL (postgresql-x64-17) left running - shared system service.
+         Stopped 2 process tree(s).
+
+AFTER    no orphaned uvicorn/next processes
+         port 8000 free, port 3000 free
+         PostgreSQL: Running
+```
+
+**What is NOT directly proven:** that a browser tab visibly appeared. Chrome is the
+registered default (`ChromeHTML`) and was already running, so `start "" <url>` opens a
+tab in the existing process rather than spawning a new one — there is no new PID to
+observe. What *is* proven is that the launcher reached and executed that step (both
+services answering, the "Ready. Opening…" banner printed, exit code 0) and that the URL
+serves a working, data-populated dashboard.
+
+#### Four real defects found by running it rather than eyeballing it
+
+1. **`.bat` written with LF line endings.** Batch files need CRLF. `.gitattributes`
+   already forces `*.bat text eol=crlf`, so a clone is correct, but the working copy
+   had to be normalised. Same class of bug as the `provision.sh` CRLF issue in
+   Phase 1, in the opposite direction.
+
+2. **Nested quoting in the launch lines.** `start "t" /min cmd /c "cd /d "%~dp0frontend" && npm run start"`
+   nests quotes inside an already-quoted `cmd /c` string, which cmd mis-parses. Fixed
+   with `start /D "<dir>"` — the directory is quoted once by `start` itself, and the
+   command that follows uses only relative paths containing no spaces.
+   **Honest correction:** this was fixed as hardening, but it was *not* the cause of
+   the failure I was chasing — see 3. The first diagnosis was wrong.
+
+3. **The frontend had no usable production build**, which was the actual cause:
+   `next start` died with *"Could not find a production build in the '.next'
+   directory"*. `.next` existed but `BUILD_ID` was missing.
+
+   The root cause is worse than a missing build, and it was mine: the Phase 8-era
+   regression check ran `npm run build | grep -q '✓ Compiled'`, and **`grep -q` exits
+   on first match, closing the pipe and SIGPIPE-ing npm partway through the build**.
+   The check reported PASS while leaving a corrupted artifact. Any check that consumes
+   a build's output with `grep -q` can do this; the regression now consumes the full
+   output instead.
+
+   The launcher now tests for `.next\\BUILD_ID` specifically — it is written *last*, so
+   its presence means a build finished rather than merely started — and runs
+   `npm install` / `npm run build` when needed, so a fresh clone works with no manual
+   steps.
+
+4. **`on was unexpected at this time`** from the stop script. The labels contained
+   parentheses (`"API (uvicorn)"`), and `%LABEL%` is expanded into a single-line
+   `if ... echo`, where a literal `)` closes the parser's block context and makes the
+   next word look like a command. Switched to square brackets, which are inert.
+
+Two smaller robustness fixes: `ping -n` replaces `timeout /t`, which aborts with
+*"Input redirection is not supported"* whenever stdin is redirected (a scheduled task
+or script, rather than a double-click); and a `SEEN_<pid>` guard stops the same PID
+being killed twice, since `netstat` lists a port once per binding (IPv4 and IPv6) and
+the second attempt reported "could not kill" for a process the script had just stopped
+itself.
+
 ### Addendum — 2026-08-27, Phase 7 reconciled against the written spec
 
 Phase 7 was built from the project owner's chat paraphrase, because the updated

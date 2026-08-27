@@ -330,6 +330,30 @@ and independent DB verification. The Linux half needs the demo VM running:
 
 ## 6. Run the dashboard
 
+### One-click (Windows)
+
+After the one-time setup above (venv, `.env`, database, `vagrant up`), double-click:
+
+```
+start_audit_tool.bat
+```
+
+It checks the PostgreSQL service, refuses to start a second copy if the tool is
+already running, builds the frontend if there is no production build yet, starts both
+services, **polls until each actually answers**, then opens your browser at
+http://localhost:3000.
+
+To shut down:
+
+```
+stop_audit_tool.bat
+```
+
+That stops the API and dashboard and **leaves PostgreSQL running** — it is a shared
+Windows service, not this application's to stop.
+
+### Manual (either platform)
+
 Start the API (terminal 1):
 
 ```bash
