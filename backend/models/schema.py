@@ -114,7 +114,46 @@ class Exception_(Base):
 
 
 class AuditLog(Base):
-    """APPEND-ONLY. Never UPDATE. Never DELETE."""
+    """APPEND-ONLY. Never UPDATE. Never DELETE.
+
+    event_type vocabulary — the authoritative list, kept current as events are added.
+
+    CLAUDE.md Section 3's inline comment enumerates
+    ``scan_started|scan_completed|control_evaluated|exception_approved|
+    credential_used|report_exported``. That list was written before the exception
+    workflow was built and is now incomplete: the workflow emits two further events
+    that the spec's comment does not mention.
+
+    Currently emitted (verified against both the codebase and the live audit_log):
+
+    ==========================  =======  ====================================
+    event_type                  phase    meaning
+    ==========================  =======  ====================================
+    scan_started                2        a scan began
+    scan_completed              2        a scan finished
+    control_evaluated           2        one control evaluated against a run
+    exception_requested         4        an exception was requested (NOT in
+                                         the spec's comment)
+    exception_approved          4        an exception was approved
+    exception_approval_denied   4        an approval was REFUSED for violating
+                                         separation of duties (NOT in the
+                                         spec's comment)
+    ==========================  =======  ====================================
+
+    ``exception_approval_denied`` is deliberately recorded rather than merely
+    refused in memory. An attempted separation-of-duties violation is itself
+    security-relevant: it is the audit trail's only record that someone tried to
+    self-approve a high or critical finding.
+
+    Declared in the spec but not yet emitted, because the features do not exist yet:
+
+    * ``credential_used``   — arrives with secrets_manager (spec Section 6)
+    * ``report_exported``   — arrives with the PDF exporter (Phase 6)
+
+    No CHECK constraint is placed on this column: an audit log that rejects an
+    unrecognised event is an audit log that can silently lose evidence when a new
+    event type ships ahead of a migration.
+    """
 
     __tablename__ = "audit_log"
 

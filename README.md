@@ -16,7 +16,8 @@ anything — it defines the phase order, the schemas, and the rules the code fol
 | 1 — Control library + SSH collector (raw output) | ✅ complete, verified |
 | 2 — Normalizer + evaluator + persistence | ✅ complete, verified |
 | 3 — Historical results + drift | ✅ complete, verified |
-| 4–7 | not started |
+| 4 — Exception workflow | ✅ complete, verified |
+| 5–7 | not started |
 
 Latest scan of the demo VM: **3 pass, 15 fail, 16.7% compliance**, every verdict
 independently confirmed on the host.
@@ -268,6 +269,18 @@ run a scan, then confirm nothing prior changed:
 
 ```bash
 ./venv/Scripts/python.exe tests/verify_phase3.py --verify-after
+```
+
+Phase 4 — exception workflow and separation-of-duties enforcement. Needs the database:
+
+```bash
+./venv/Scripts/python.exe tests/verify_phase4.py --sod
+```
+
+Open findings vs accepted risk for the latest run:
+
+```bash
+./venv/Scripts/python.exe tests/verify_phase4.py --views
 ```
 
 ---

@@ -519,6 +519,218 @@ Three independent checks, none sharing a code path with the thing under test:
   Unchanged; still `# TODO`; must close before Phase 7.
 - **Legacy-host reachability** (Addendum 4, architecture.md §3.1) remains open.
 
+### Phase 3 addendum — drift across a CHANGED control set, tested for real
+
+The Phase 3 write-up argued from the SQL that `FULL JOIN` + `IS DISTINCT FROM`
+handles a control appearing or disappearing between runs. That was reasoning, not
+evidence. At the project owner's request it is now demonstrated with real runs.
+
+`run_scan.py` gained a `--controls-dir` flag so a scan can be executed against a
+genuinely different control set **without mutating the real 18-control library**. A
+temporary 19-control set (the 18 plus one extra, `CIS-5.2.20`) was assembled in a
+scratch directory, and two further scans were run:
+
+```
+run 5  --controls-dir <19 controls>   ->  19 results
+run 6  (default 18 controls)          ->  18 results
+
+  run b4811f62 -> 64ccb53e: 1 appeared
+      appeared     CIS-5.2.20   [medium] None  -> error
+  run 64ccb53e -> 19b4544d: 1 disappeared
+      disappeared  CIS-5.2.20   [medium] error -> None
+```
+
+Both directions are handled correctly. An inner join would have silently dropped
+both rows.
+
+Two incidental confirmations from the same test, neither of which was the point but
+both of which are worth recording:
+
+1. **The added control returned `error`, not a false `pass`.** `CIS-5.2.20` checks
+   `MaxAuthTries`, which the normalizer does not produce, so the control/normalizer
+   mismatch guard fired exactly as designed. Adding a control without extending the
+   normalizer cannot silently produce a passing verdict.
+2. **Compliance stayed 16.7% in run 5 despite the extra `error`.** This validates the
+   denominator decision: `error` is excluded, so an unevaluatable control does not
+   depress the compliance figure and make a tooling gap look like a security
+   regression.
+
+`backend/controls/` still contains exactly 18 files and the control-library tests
+pass. The `controls` table now holds 19 rows, because `results` from run 5 reference
+`CIS-5.2.20` via foreign key — a control definition cannot be deleted while
+historical evidence points at it, which is the correct behaviour for an audit trail.
+It is absent from the latest run, so current posture is unaffected.
+
+---
+
+## Phase 4 — Exception workflow
+
+**Date:** 2026-08-27
+**Status:** ✅ **COMPLETE — all acceptance criteria met with evidence.**
+
+### What was built
+
+- **`backend/exceptions_service.py`** — request, approve, and the two views
+  (`open_findings`, `accepted_risks`), plus `expired_exceptions`.
+- **`tests/verify_phase4.py`** — workflow, separation-of-duties and expiry harness.
+
+### Core design decision: an exception never rewrites a result
+
+`results` stays append-only and continues to record `fail`. An exception is applied
+as a **filter over the view**, not a mutation of the evidence — a suppressed finding
+is still a `fail` row, merely presented under "accepted risk" instead of "open
+findings".
+
+If approval flipped the stored outcome to `pass`, the compliance percentage would
+improve because somebody signed a form, and there would be no surviving record that
+the control was ever failing. Verified explicitly: every row in the accepted-risk
+view still carries `outcome = 'fail'`.
+
+### Acceptance: request an exception on a failing control ✅
+
+`exception_requested` recorded, row created with `status = 'pending_review'` and
+`approved_by = NULL`. A pending exception suppresses nothing — suppression requires
+`approved_by IS NOT NULL`.
+
+### Acceptance: distinct approver enforced for high/critical ✅
+
+Enforced in `approve_exception`, which raises `ApprovalError`. Not a comment, not a
+convention.
+
+```
+PASS  critical: self-approval REFUSED
+PASS  critical: 'Aravind ' cannot bypass via case/whitespace
+PASS  refused approval left the row unapproved (status=pending_review approved_by=None)
+PASS  critical: distinct approver ACCEPTED (approved_by=priya status=accepted_risk)
+PASS  approval_date recorded
+PASS  already-approved exception cannot be re-approved
+PASS  medium: self-approval ALLOWED (spec limits SoD to high/critical)
+```
+
+Identity comparison is whitespace-trimmed and case-folded, so `"  Aravind "` cannot
+slip past a rule that a naive `==` would have missed.
+
+`medium` self-approval is permitted deliberately: spec Section 3 scopes the rule to
+high/critical (*"must differ from requested_by if severity is high/critical"*).
+Flagged here because it is a real policy gap someone may want closed — a blanket
+four-eyes rule would be defensible, but it is not what the spec says.
+
+**Verified in the database directly, not through the service's return value** (at the
+project owner's request — same principle as the Phase 2/3 psql verification). A fresh
+self-approval was refused and the row left deliberately unapproved:
+
+```
+exception_id  | ba14c227-79af-4cf3-afb5-a2479261a767
+control_id    | CIS-5.2.10   (severity high)
+status        | pending_review
+requested_by  | aravind
+approved_by   |
+approval_date |
+
+ approved_by_is_null | status_is_pending_review | approval_date_is_null
+---------------------+--------------------------+-----------------------
+ t                   | t                        | t
+```
+
+### Acceptance: excluded from open findings, visible in accepted risk ✅
+
+```
+total failing results in run : 15
+OPEN FINDINGS                : 14
+ACCEPTED RISK                :  1
+
+CONTROL      SEV       RESULT  REQ        APPR    EXPIRES
+CIS-1.4.2    critical  fail    aravind    priya   2026-09-03 15:39:51
+```
+
+`open + accepted == total failing` is asserted every time the view is rendered, so a
+finding can neither vanish nor be double-counted.
+
+### Acceptance: returns to `fail` after expiry, on a subsequent run ✅
+
+Demonstrated with a real clock, a real row and a real scan — the expiry check was
+never called in isolation.
+
+```
+10:10:09Z  exception created on CIS-3.1.1 (critical), expiry_date 10:12:10Z (+120s)
+           requested_by aravind, approved_by priya
+10:10:12Z  OPEN FINDINGS 13  |  ACCEPTED RISK 2   <- CIS-3.1.1 suppressed
+10:12:37Z  wall clock passes expiry; REAL scan run against the live VM
+10:13:11Z  OPEN FINDINGS 14  |  ACCEPTED RISK 1   <- CIS-3.1.1 is an open finding again
+
+expired (approved but lapsed) exceptions: 1
+  CIS-3.1.1  [critical] approved_by=priya  expired 2026-08-27 15:42:10
+```
+
+CIS-1.4.2's 7-day exception remained active throughout, so the transition is
+attributable to expiry rather than to something global.
+
+**No scheduled job is involved.** Expiry is evaluated at query time against the
+current clock, so an exception lapses on its own. There is no cron entry to forget to
+run and no state to reconcile — the mechanism cannot silently fail closed *or* open.
+
+Three-way suppression matrix confirmed in raw SQL:
+
+```
+ control_id | severity | outcome | suppressed
+ CIS-1.4.2  | critical | fail    | t     <- approved, unexpired
+ CIS-3.1.1  | critical | fail    | f     <- approved, EXPIRED
+ CIS-5.2.10 | high     | fail    | f     <- requested, NEVER APPROVED
+```
+
+### Spec discrepancy: `audit_log.event_type` vocabulary is incomplete in Section 3
+
+CLAUDE.md Section 3's inline comment lists
+`scan_started|scan_completed|control_evaluated|exception_approved|credential_used|report_exported`.
+The exception workflow emits two events that comment does not mention.
+
+Verified against both the codebase and the live table:
+
+| event_type | in Section 3's comment? | rows |
+|---|---|---|
+| `scan_started` | yes | 7 |
+| `scan_completed` | yes | 7 |
+| `control_evaluated` | yes | 127 |
+| `exception_requested` | **no** | 3 |
+| `exception_approved` | yes | 2 |
+| `exception_approval_denied` | **no** | 1 |
+| `credential_used` | yes — not yet emitted (needs secrets_manager) | 0 |
+| `report_exported` | yes — not yet emitted (Phase 6) | 0 |
+
+The authoritative list now lives in the `AuditLog` docstring in
+`backend/models/schema.py` and is to be kept current as events are added.
+**CLAUDE.md itself was left untouched** — the project owner tracks its sha256 for
+sync purposes, so editing it here would desync that. The Section 3 comment should be
+updated on their side when convenient.
+
+`exception_approval_denied` is recorded rather than merely refused in memory: an
+attempted separation-of-duties violation is security-relevant, and this is the audit
+trail's only record that someone tried to self-approve a high/critical finding.
+
+No CHECK constraint is placed on `event_type`. An audit log that rejects an
+unrecognised event is an audit log that can silently lose evidence when a new event
+type ships ahead of a migration.
+
+### Rule 8 — independent self-verification
+
+Every claim above was re-checked in raw `psql` rather than through
+`exceptions_service.py`'s return values: the refused row's `approved_by`/`status`/
+`approval_date`, the three-way suppression matrix (computed with an inline `EXISTS`
+subquery rather than the service's SQL), the event-type census, and the
+open/accepted/total arithmetic.
+
+### Deviations and open items
+
+- **`backend/exceptions_service.py`** is not in the Section 2 file listing.
+- **`exceptions` is not append-only** — unlike `results` and `audit_log`, approval
+  mutates the row in place (`status`, `approved_by`, `approval_date`). The spec's DDL
+  models it that way, and the immutable trail of who requested and who approved lives
+  in `audit_log`. Test rows were also deleted from it during verification, which
+  would be prohibited on the append-only tables.
+- **Credentials still not behind `secrets_manager`** (Section 6). Must close before
+  Phase 7.
+- **Legacy-host reachability** (architecture.md §3.1) remains open.
+
 ### Addendum 3 — 2026-08-27, source control and collaboration setup
 
 Prompted by an imminent laptop switch and additional contributors joining.

@@ -379,6 +379,39 @@ make the headline percentage move for reasons unrelated to the host's security p
 — an SSH permission problem would render as a security regression. Both are reported as
 separate counts so they stay visible instead of silently vanishing.
 
+## 5b. Exceptions suppress the view, never the evidence
+
+An approved exception does **not** change a `results` row. Results stay append-only
+and continue to record `fail`; the exception is applied as a filter, so a suppressed
+finding appears under "accepted risk" instead of "open findings" while remaining a
+`fail` in the evidence.
+
+If approval rewrote the outcome to `pass`, the compliance percentage would improve
+because somebody signed a form, and nothing would survive to show the control was
+ever failing. The accepted-risk view asserts on every render that every row it
+returns still carries `outcome = 'fail'`, and that
+`open + accepted == total failing`, so a finding can neither vanish nor be
+double-counted.
+
+**Separation of duties is enforced, not documented.** For `high` and `critical`
+controls `approve_exception` raises `ApprovalError` when the approver matches the
+requester, comparing identities case-folded and whitespace-trimmed so `"  Aravind "`
+cannot slip past. The refusal is itself written to `audit_log` as
+`exception_approval_denied` — an attempted self-approval of a critical finding is
+security-relevant, and that row is the only record it was tried.
+
+Note the spec scopes this to high/critical only, so `medium` and `low` exceptions may
+be self-approved. That is implemented as written and flagged in `BUILD_LOG.md` as a
+policy gap someone may want to close.
+
+**No permanent exceptions, and no scheduled job.** `expiry_date` is NOT NULL, and
+suppression is evaluated at query time against the current clock — an exception
+lapses on its own. There is no cron entry to forget to run and no state to reconcile,
+so the mechanism cannot silently fail open or closed. Verified end to end with a real
+120-second expiry: suppressed at 10:10:12Z, and back as an open finding after a real
+scan at 10:13:11Z, while a second exception with a 7-day expiry stayed active
+throughout.
+
 ---
 
 ## 6. Deviations from spec
@@ -413,7 +446,10 @@ Every deviation, with reasoning. Full detail in `BUILD_LOG.md`.
 | 2 | Every run writes a `runs` row and per-control `results` rows | ✅ verified against live PostgreSQL 17.11 (1 run, 18 results, 20 audit_log rows sharing one correlation_id; 18/18 rule-8 cross-check of persisted rows vs fresh on-host derivation) |
 | 3 | Same scan twice → two distinct `run_id`s, no mutation of prior rows | ✅ verified (4 runs; per-row SHA-256 fingerprints show 0 mutated, 0 deleted across every scan) |
 | 3 | Basic trend query (compliance % per run over time) returns correct data | ✅ verified (recomputed independently in Python and in `psql` with different SQL; real induced drift detected, identical scans correctly show none) |
-| 4–7 | — | not started |
+| 4 | Request exception; approve with distinct approver for high/critical | ✅ verified (7/7 checks; self-approval refused and confirmed unapproved in raw SQL) |
+| 4 | Excluded from open findings, visible in accepted risk | ✅ verified (15 failing → 14 open + 1 accepted; suppressed row still stored as `fail`) |
+| 4 | Returns to `fail` after `expiry_date` on a subsequent run | ✅ verified with a real 120s expiry, real clock and a real scan (13+2 → 14+1) |
+| 5–7 | — | not started |
 
 No criterion in this table is marked verified without corresponding evidence recorded
 in `BUILD_LOG.md`.

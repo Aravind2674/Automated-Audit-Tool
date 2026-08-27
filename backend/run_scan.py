@@ -80,9 +80,17 @@ def main() -> int:
     parser.add_argument("--key", dest="key_filename")
     parser.add_argument("--triggered-by", default="cli")
     parser.add_argument("--no-db", action="store_true", help="evaluate without persisting")
+    parser.add_argument(
+        "--controls-dir",
+        help="load controls from this directory instead of backend/controls/. "
+             "Used to exercise drift across a CHANGED control set without "
+             "mutating the real 18-control library.",
+    )
     args = parser.parse_args()
 
-    controls = load_controls()
+    controls = load_controls(
+        pathlib.Path(args.controls_dir) if args.controls_dir else None
+    )
     run_id = uuid.uuid4()
     correlation_id = uuid.uuid4()
     started_at = _now()
