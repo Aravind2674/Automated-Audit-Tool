@@ -1650,6 +1650,62 @@ being killed twice, since `netstat` lists a port once per binding (IPv4 and IPv6
 the second attempt reported "could not kill" for a process the script had just stopped
 itself.
 
+#### Follow-up: did the SIGPIPE bug invalidate earlier phases' "frontend build PASS"?
+
+Asked directly, and worth answering with evidence rather than recollection.
+
+**Assume the worst — that the `frontend build` line in the Phase 6 and Phase 7
+regression tables used the same `npm run build | grep -q` form.** Those particular
+lines were then weak evidence: `grep -q` can exit on first match and SIGPIPE the
+build, so a PASS there asserts only that the build *reached* the "Compiled" line, not
+that it finished.
+
+**It does not invalidate those phases, for three independent reasons.**
+
+1. **No committed test harness invokes `npm run build` at all.** Verified with
+   `git grep`: the frontend build only ever ran from ad-hoc shell commands. The
+   `grep -q` uses that *are* committed (in `crosscheck_phase2.py`) run short remote
+   commands — `sshd -T`, `stat`, `findmnt`, `dpkg-query` — where only grep's exit
+   status matters and no artifact is being produced. The build case was different
+   precisely because the side effect, not the exit status, was the point.
+
+2. **`.next` is gitignored.** It is a local artifact; a corrupt one could never affect
+   committed code or any backend correctness claim.
+
+3. **Decisively: every check that actually depended on the built frontend worked at
+   the time it ran.** A build missing `BUILD_ID` makes `next start` refuse to start at
+   all — it exits immediately rather than serving a broken page. So a served page is
+   itself proof the build was sound:
+   - Phase 6 read the complete rendered DOM (compliance, six domain rows, trend,
+     exceptions) from a running `next start`.
+   - Phase 7 rendered the login gate, submitted the form, and rendered the dashboard
+     as `aravind`.
+   - The async work clicked "Run New Scan" in the browser and saw the banner.
+
+   The corruption first appeared when the launcher ran `npm run start`, immediately
+   after the one regression that used the `grep -q` form. `.next`'s timestamps match
+   that run.
+
+**Re-verified anyway, on a known-good build** (`BUILD_ID` confirmed present), so the
+claims rest on current evidence rather than inference:
+
+```
+login gate renders (auth enforced in UI)   PASS
+document.cookie -> "(none - HttpOnly holds)"
+dashboard renders: signed in as aravind
+  DOM: compliance 16.7% | open findings 43 | 6 domains | 29 trend points
+  SQL: compliance 16.7% | open findings 43 | 6 domains | 29 completed runs
+```
+
+DOM and direct SQL agree exactly.
+
+**Unrelated finding during this re-run:** three suites (`verify_phase7`,
+`verify_phase8`, both cross-checks) initially failed because the demo VM had been left
+in VirtualBox's `saved` state after the host slept. `vagrant up` resumed it and all
+three passed. Worth knowing for the demo: **the launcher starts the application but
+not the demo VM**, so live scans fail until `vagrant up` has been run. Either add it to
+the launcher or run it first — see the open items.
+
 ### Addendum — 2026-08-27, Phase 7 reconciled against the written spec
 
 Phase 7 was built from the project owner's chat paraphrase, because the updated
