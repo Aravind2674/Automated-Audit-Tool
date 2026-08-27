@@ -48,8 +48,9 @@ Pinned in `requirements.txt`.
   to be written against.
 - **`demo-environment/Vagrantfile` + `provision.sh`** — Ubuntu 22.04 host-only VM,
   deliberately misconfigured.
-- **`demo-environment/EXPECTED_POSTURE.md`** — per-control answer key (4 pass,
-  14 fail by design) for manual verification in Phase 2.
+- **`demo-environment/EXPECTED_POSTURE.md`** — per-control answer key for manual
+  verification in Phase 2. Originally 4 pass / 14 fail; corrected to **3 pass /
+  15 fail** in Phase 2 after the squashfs finding.
 
 ### What was verified, and how
 
@@ -61,13 +62,13 @@ Pinned in `requirements.txt`.
    rejected. ✅
 3. **Control↔collector coverage** — all 14 sources required by the 18 controls have
    a command mapping; no unmapped sources, no orphaned mappings. ✅
-4. **Collector code path executes** — with a fake transport substituted for Fabric's
-   `Connection`, `collect()` returned 14 docs, ran all 66 commands, and preserved
-   non-zero exit codes as evidence rather than raising. ⚠️ *Synthetic output — this
-   validates the code path only, not any real host's state.*
-5. **Real collection attempted and failed** — both `--from-vagrant-ssh-config` and a
-   direct connection to the Vagrantfile's `192.168.56.10` failed, because no VM
-   exists. **This is the unmet acceptance criterion.** ❌
+4. **Collector code path executes** — first validated with a fake transport (14 docs,
+   66 commands, non-zero exits preserved as evidence). That run used synthetic output
+   and proved only the code path, never any host's state.
+5. **Real collection against the live VM** — 14/14 sources, 66/66 commands, output in
+   `phase1_raw_output.json`, independently cross-checked over a fresh SSH connection
+   (7/7 byte-identical) and sanity-checked to contain the 10 specific states
+   `provision.sh` creates. ✅ See Addendum 4.
 
 ### Deviations from spec — flagged explicitly
 
@@ -89,9 +90,11 @@ Pinned in `requirements.txt`.
    `operator` field and an optional composite `all_of`/`any_of` + `checks` form. The
    flat form from the spec example still validates and is used where it fits
    (CIS-5.2.10, CIS-5.3.1, CIS-5.3.2).
-4. **`EXPECTED_POSTURE.md` is unverified.** It records what `provision.sh` is written
-   to produce, not what a running VM was observed to do. Every row must be confirmed
-   by hand on the live VM before Phase 2 treats it as ground truth.
+4. **`EXPECTED_POSTURE.md` was unverified when first written** — it recorded what
+   `provision.sh` is written to produce, not what a running VM was observed to do.
+   Now resolved: all 18 rows are confirmed against the live VM (Phase 2, rule 8
+   cross-check), and one row was found to be **wrong** and corrected — see the
+   squashfs finding in the Phase 2 entry.
 
 ### Addendum — 2026-08-27, follow-up session
 
@@ -177,6 +180,144 @@ is the usual failure mode there.
 
 Host capability confirmed before provisioning: 8 processor cores, 15674 MB RAM,
 81.7 GB free on C:.
+
+---
+
+## Phase 2 — Normalizer + evaluation engine, Linux controls only
+
+**Date:** 2026-08-27
+**Status:** see the acceptance section below — evaluation correctness is met and
+independently verified; database persistence is pending PostgreSQL finishing install.
+
+### What was built
+
+- **`backend/engine/normalizer.py`** — 14 per-source parsers, written against the real
+  `phase1_raw_output.json`, not fixtures. Emits the canonical
+  `{resource_type, resource_id, attributes}` shape. `collector_type` is consumed here
+  and never appears in the output.
+- **`backend/engine/evaluator.py`** — the 9 leaf operators and 2 composite operators
+  declared in `control_library`, with `pass`/`fail`/`error`/`manual_review` semantics.
+  Contains no reference to `collector_type` (spec Section 5).
+- **`backend/models/schema.py`** — SQLAlchemy models mirroring the Section 3 DDL,
+  CHECK constraints included.
+- **`backend/db.py`** — engine/session; URL from `DATABASE_URL`, never hardcoded.
+- **`backend/audit.py`** — append-only audit sink. Deliberately exposes no update or
+  delete method, so the append-only rule is enforced by the absence of an API rather
+  than by everyone remembering it.
+- **`backend/run_scan.py`** — collect → normalize → evaluate → persist orchestrator.
+- **`tests/crosscheck_phase2.py`** — rule 8 verification.
+
+### Three real-host traps the normalizer had to handle
+
+These are the concrete payoff of Section 7's instruction to build the normalizer
+against real captured output rather than invented fixtures. None would have appeared
+in a fixture written from intuition.
+
+1. **`systemctl is-active ufw` reported `active` on a host with no firewall running.**
+   `ufw status` said `Status: inactive` and `is-enabled` said `disabled`. The ufw unit
+   is a oneshot that remains "active" after exiting regardless of whether ufw is
+   enforcing anything. Trusting `is-active` would have passed CIS-3.1.1 — a *critical*
+   control — on a completely unprotected host. The parser uses `ufw status` only.
+
+2. **`sshd -T` versus the config file.** `/etc/ssh/sshd_config` contains an `Include`
+   and the drop-in `99-audit-demo.conf` overrides it. Parsing the main file would have
+   reported the distro default for `PermitRootLogin` and missed the override entirely.
+   Only the post-Include effective config is parsed.
+
+3. **A fully-commented `faillock.conf` shipped by the distro.** The file exists and
+   looks like configuration, but `pam_faillock.so` is not in the PAM auth stack, so it
+   enforces nothing. The parser requires the module to be wired in before reading the
+   file as configured.
+
+### Finding: EXPECTED_POSTURE.md contained an error, caught against the real VM
+
+The answer key predicted CIS-1.1.1 would **pass**, because `provision.sh` writes
+`install squashfs /bin/false` for all seven filesystem modules. On the actual VM the
+control **fails**, and the evaluator was right:
+
+```
+CONFIG_SQUASHFS=y          <- compiled into the kernel, not a module
+CONFIG_CRAMFS=m            <- genuinely a module
+/proc/filesystems: squashfs
+no squashfs.ko anywhere under /lib/modules/$(uname -r)
+```
+
+A modprobe install override cannot disable a filesystem that is built into the kernel.
+The override is inert and squashfs remains available. `EXPECTED_POSTURE.md` has been
+corrected (4 pass/14 fail → **3 pass/15 fail**, compliance 16.7%) with the reasoning
+recorded inline.
+
+This is the case Section 9 rule 6 exists for. Had the evaluator been "verified" against
+the answer key rather than against the host, the sensible move would have been to
+adjust the evaluator until it matched — which would have meant breaking correct code to
+satisfy a wrong expectation.
+
+The right remedy is the Phase 4 exception workflow, not a weakened control: snapd
+mounts squashfs images and the host genuinely depends on it, which is exactly an
+"accepted risk with compensating control". CIS-1.1.1's own remediation text already
+anticipates this case.
+
+### Acceptance criteria
+
+**1. Correct pass/fail for all 18 controls, verified against the VM's actual config.**
+✅ Met.
+
+```
+outcome totals: {'fail': 15, 'pass': 3}
+compliance: 3/18 = 16.7%
+MISMATCHES vs EXPECTED_POSTURE.md: 0
+```
+
+**Rule 8 independent verification.** `tests/crosscheck_phase2.py` re-derived every
+control's verdict over a **fresh SSH connection** using commands formulated
+independently of the collector's — `sysctl -n`, `stat -c %a`,
+`systemctl is-active --quiet`, `findmnt -o OPTIONS`, `apt-config dump`, none of which
+the collector uses in that form. Re-running the collector's own command through the
+normalizer's own parser would only prove the pipeline is deterministic; it would not
+catch collector and normalizer agreeing about something the host never said.
+
+```
+cross-checked : 18 controls
+matched       : 18
+mismatched    : 0
+```
+
+All 18 rows of `EXPECTED_POSTURE.md` are now confirmed against the live VM.
+
+**Outcome paths beyond pass/fail** — all four verified:
+
+```
+manual_review  scored:false fixture            -> manual_review   PASS
+error          source unavailable              -> error, NOT fail PASS
+error          control names unknown attribute -> error           PASS
+error          exception inside comparison     -> error           PASS
+audit_log      18 controls -> 18 rows, all event_type=control_evaluated,
+               all sharing one correlation_id                     PASS
+```
+
+The `error` vs `fail` boundary is deliberate: a value of `None` means "read the host
+fine, setting not configured" → **fail**; a source marked `UNAVAILABLE` means "could
+not read the host" → **error**. Collapsing them would let a missing sudo right appear
+as a tidy list of compliance failures, which is worse than crashing because it looks
+credible.
+
+**2. Every run writes a `runs` row and per-control `results` rows.**
+⏳ **Not yet verified.** Code is complete and the orchestrator runs end-to-end without
+a database (18 results, 19 audit rows). PostgreSQL was blocked for part of this
+session by an EnterpriseDB HTTP 403 on the installer download — transient, later
+returning HTTP 200 — and the install was still in progress at the time of writing.
+**This criterion must be confirmed against a live database before Phase 3 starts.**
+
+### Deviations and open items
+
+- **`scan_completed` audit event** is emitted regardless of persistence mode, so the
+  trail records a finished scan even for `--no-db` runs.
+- **Section 2 file listing additions:** `backend/db.py`, `backend/audit.py`,
+  `backend/run_scan.py`, `backend/models/schema.py`. The spec names `/models` and
+  `/api` directories but not these modules.
+- **Credentials still come from the target dict**, not `secrets_manager` (spec
+  Section 6). Unchanged from Phase 1; still marked TODO; must close before Phase 7.
+- **Legacy-host reachability** (Addendum 4) remains open for `architecture.md`.
 
 ### Addendum 3 — 2026-08-27, source control and collaboration setup
 
