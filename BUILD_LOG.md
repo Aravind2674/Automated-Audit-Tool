@@ -929,7 +929,7 @@ vice versa, so the two sets cannot drift into each other's namespace.
   verbatim per-finding evidence.
 - **`frontend/`** — Next.js 15 + React 19 + Tailwind dashboard
   (`components/Dashboard.tsx`), including an inline-SVG compliance trend chart.
-- **`tests/verify_phase6.py`** — 38 checks.
+- **`tests/verify_phase6.py`** — 40 checks in the current database state. The count is data-dependent (it loops over domains, exceptions and trend rows), so it grows as more runs and exceptions accumulate rather than being fixed.
 
 ### Section 10 install record
 
@@ -1006,7 +1006,7 @@ style from `backend/queries.py` — `CASE/SUM` aggregates and correlated subquer
 instead of `FILTER` and `EXISTS` — so agreement means the figures are right rather
 than merely that one code path is deterministic.
 
-27 dashboard checks, all passing: total/passed/failed/errored/manual_review,
+29 dashboard checks in the current database state, all passing: total/passed/failed/errored/manual_review,
 open_findings, accepted_risk, `open + accepted == failed`, compliance % recomputed
 from raw counts, all six per-domain rows, per-severity counts (and that they sum to
 open_findings), the exception id set, each exception's `expired` flag and
