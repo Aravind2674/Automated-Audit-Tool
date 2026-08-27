@@ -134,7 +134,7 @@ CREATE TABLE audit_log (                -- APPEND-ONLY
   correlation_id UUID NOT NULL,
   run_id UUID,
   actor VARCHAR NOT NULL,
-  event_type VARCHAR NOT NULL,          -- scan_started|scan_completed|control_evaluated|exception_approved|credential_used|report_exported
+  event_type VARCHAR NOT NULL,          -- scan_started|scan_completed|control_evaluated|exception_requested|exception_approved|exception_approval_denied|credential_used|report_exported
   timestamp TIMESTAMPTZ NOT NULL,
   result VARCHAR NOT NULL,
   details JSONB
@@ -302,7 +302,18 @@ automatically return to `fail` after `expiry_date` passes on a subsequent run.
 
 **Phase 5 — AWS collector**
 Acceptance: same correctness bar as Phase 2, against a real or mocked AWS test
-account, for the 6-8 AWS controls listed in Section 4.
+account, for the 6-8 AWS controls listed in Section 4. **No real AWS account is
+available yet** — use the `moto` library to mock boto3 calls in-process. This is
+a genuine rigor reduction versus Phases 1-4's real VM, not an equivalent
+substitute — say so explicitly in BUILD_LOG.md and architecture.md, the same way
+Docker-vs-Vagrant and fixture-vs-real-output were flagged earlier, not silently
+treated as identical. Construct moto fixtures independently for rule 8's
+cross-check (a second, separately-written fixture set, not reuse of the one the
+collector was built against) — the same principle as a fresh SSH connection in
+Phase 1-3, applied to mocks instead of a live host. Document in architecture.md
+that this phase needs re-validation against a real AWS account before the
+findings can be trusted the way the Linux controls now are — flag it as an open
+item, not a completed one, until that happens.
 
 **Phase 6 — Dashboard + report export**
 Acceptance: dashboard shows overall %, per-domain breakdown, open exceptions with

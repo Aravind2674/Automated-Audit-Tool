@@ -1,0 +1,41 @@
+id: AWS-3.1
+title: Ensure CloudTrail is enabled and logging across all regions
+framework_mappings:
+  cis_aws_v3: "3.1"
+  nist_csf: "DE.AE-3"
+  soc2: "CC7.2"
+  cert_in_marker: "DET"
+severity: critical
+category: logging
+description: >
+  Verifies that at least one CloudTrail trail exists which is multi-region, currently
+  logging, and includes management events for both read and write operations.
+  CloudTrail is the record of who called which API, from where and when — without it
+  an investigation has essentially nothing to work from. A single-region trail is a
+  particular trap: an attacker can operate in any region the trail does not cover and
+  leave no record at all, so a trail that exists but is region-scoped can give a
+  false sense of coverage. The check requires the trail to be actively logging as well
+  as configured, since a trail can be created and then stopped.
+applies_to: [aws_account]
+test_logic:
+  collector: cloudtrail
+  operator: all_of
+  checks:
+    - check: multi_region_trail_exists
+      operator: equals
+      expected: true
+    - check: is_logging
+      operator: equals
+      expected: true
+    - check: management_events_all
+      operator: equals
+      expected: true
+remediation: >
+  Create a trail with multi-region logging enabled and a management event selector
+  covering both read and write events, then confirm it is actively logging. Send it to
+  a dedicated S3 bucket in a separate, tightly controlled account so that an attacker
+  who compromises the audited account cannot delete the evidence, and enable log file
+  validation so tampering is detectable. Apply an S3 lifecycle policy and object lock
+  deliberately: CloudTrail volume can be substantial, and the cost is easier to justify
+  before an incident than the absence of logs is to explain after one.
+scored: true

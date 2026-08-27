@@ -297,6 +297,60 @@ host. No SIEM or ticketing integration. No SSO/OAuth; session-based auth only. T
 collector types (SSH, AWS) and 18 Linux + up to 8 AWS controls. These are explicit
 non-goals in spec Section 8, not oversights.
 
+### 3.6 The AWS findings are NOT verified to the standard of the Linux findings
+
+**This is the single most important caveat in this document. Phase 5 is an open item,
+not a completed one.**
+
+No AWS account was available for this build, so the AWS collector was verified against
+[`moto`](https://github.com/getmoto/moto), an in-process mock of the AWS APIs. Every
+Phase 5 result — 6 controls, both fixture scenarios, the rule 8 cross-check — was
+produced by talking to a Python library, not to AWS.
+
+**This is a genuine reduction in rigor, not an equivalent substitute.** Phases 1–4 ran
+against a live Ubuntu VM over a real SSH connection, and that is precisely how the
+three parsing traps in §2.1 were found — a mock would have returned whatever its author
+expected `systemctl is-active` to return, which is exactly the wrong answer that
+started that investigation. The same class of surprise almost certainly exists in the
+AWS API surface and this build has not been positioned to encounter it.
+
+What moto verifies and what it does not:
+
+| | Verified | Not verified |
+|---|---|---|
+| Control logic and operators | ✅ against two independent scenarios | |
+| Response *shapes* | ✅ as moto models them | ❌ whether moto matches real AWS |
+| Pagination | | ❌ moto returns small result sets in one page; real accounts paginate `ListBuckets`, `DescribeVolumes`, `DescribeSecurityGroups` |
+| IAM permission behaviour | | ❌ moto does not enforce `SecurityAudit` scope, so a call this tool is not actually permitted to make would still succeed here |
+| Multi-region behaviour | | ❌ only one region is exercised; real estates span regions and CloudTrail's multi-region semantics matter |
+| Eventual consistency, throttling, partial failures | | ❌ not modelled at all |
+
+**A specific, named gap: the root account is not modelled at all.** moto fixes
+`AccountMFAEnabled` and `AccountAccessKeysPresent` at `0` and provides no way to change
+them — `enable_mfa_device(UserName="root")` and `create_access_key(UserName="root")`
+both raise `NoSuchEntity`. Therefore:
+
+* **AWS-1.5** (root MFA) can only ever be exercised in the **`fail`** direction.
+* **AWS-1.4** (no root access keys) can only ever be exercised in the **`pass`**
+  direction.
+
+AWS-1.4 in particular is misleading in the current test output: it passes because moto
+cannot represent a root access key, not because any account has been verified clean.
+The parser logic for all four MFA/key combinations is covered by direct parser-level
+tests in `tests/verify_phase5.py`, which confirms the *code* is right — but a passing
+code path is not an observation about an account, and this document does not pretend
+otherwise.
+
+**Required before the AWS findings can be trusted the way the Linux findings now are:**
+re-run the full Phase 5 verification against a real AWS test account with deliberately
+misconfigured resources — the cloud equivalent of the demo VM — and reconcile the
+results against a hand-built answer key, exactly as `EXPECTED_POSTURE.md` was
+reconciled for Linux. Until that happens, Phase 5 stays open.
+
+This is the same category of deliberate, documented substitution as Vagrant-for-Docker
+(§3.2) and is recorded here for the same reason: so that nobody reading a compliance
+report from this tool mistakes a mocked result for a measured one.
+
 ---
 
 ## 4. Technology rationale
@@ -449,7 +503,8 @@ Every deviation, with reasoning. Full detail in `BUILD_LOG.md`.
 | 4 | Request exception; approve with distinct approver for high/critical | ✅ verified (7/7 checks; self-approval refused and confirmed unapproved in raw SQL) |
 | 4 | Excluded from open findings, visible in accepted risk | ✅ verified (15 failing → 14 open + 1 accepted; suppressed row still stored as `fail`) |
 | 4 | Returns to `fail` after `expiry_date` on a subsequent run | ✅ verified with a real 120s expiry, real clock and a real scan (13+2 → 14+1) |
-| 5–7 | — | not started |
+| 5 | Same correctness bar as Phase 2, for the 6 AWS controls | ⚠️ **verified against moto only — NOT to the Phase 1–4 standard.** All checks pass across two independently written fixture scenarios, but every result came from a mock. **Open until re-validated against a real AWS account — see §3.6.** |
+| 6–7 | — | not started |
 
 No criterion in this table is marked verified without corresponding evidence recorded
 in `BUILD_LOG.md`.

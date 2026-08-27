@@ -1,0 +1,32 @@
+id: AWS-5.2
+title: Ensure no security group allows unrestricted ingress to SSH
+framework_mappings:
+  cis_aws_v3: "5.2"
+  nist_csf: "PR.AC-5"
+  soc2: "CC6.6"
+  cert_in_marker: "PRO"
+severity: critical
+category: network
+description: >
+  Verifies that no security group permits inbound traffic to port 22 from 0.0.0.0/0 or
+  ::/0. A security group open to the whole internet on SSH exposes the login service of
+  every instance attached to it to continuous automated credential attacks, and it is
+  the single most commonly exploited misconfiguration in cloud environments. Both the
+  IPv4 and IPv6 any-address forms are checked, because closing only the IPv4 rule while
+  leaving ::/0 in place is a frequent and easily missed mistake on dual-stack VPCs. Rules
+  expressed as port ranges that merely contain 22 are treated the same as an explicit
+  port 22 rule.
+applies_to: [security_group]
+test_logic:
+  collector: security_group
+  check: unrestricted_ssh_ingress
+  operator: equals
+  expected: false
+remediation: >
+  Replace the 0.0.0.0/0 rule with the specific CIDR ranges that genuinely require SSH,
+  or remove direct SSH entirely in favour of AWS Systems Manager Session Manager, which
+  needs no inbound rule at all and logs each session. A bastion host restricted to known
+  ranges is an acceptable middle ground. Check for a ::/0 rule alongside the IPv4 one.
+  Before deleting the rule, confirm how operators currently reach these instances — the
+  rule may be the only remaining access path, and removing it can lock everyone out.
+scored: true

@@ -1,0 +1,43 @@
+id: AWS-2.1.5
+title: Ensure S3 buckets block public access at the bucket level
+framework_mappings:
+  cis_aws_v3: "2.1.5"
+  nist_csf: "PR.AC-3"
+  soc2: "CC6.6"
+  cert_in_marker: "PRO"
+severity: high
+category: data_protection
+description: >
+  Verifies that each S3 bucket has all four Block Public Access settings enabled:
+  blocking public ACLs, ignoring existing public ACLs, blocking public bucket policies,
+  and restricting public buckets. Publicly readable buckets remain one of the most
+  common causes of large-scale data exposure, and the failure is usually accidental —
+  a policy or ACL added for a temporary purpose and never revoked. Block Public Access
+  is a guardrail that overrides those settings, so it holds even when a bucket policy
+  is later changed carelessly. All four flags are checked separately because enabling
+  only some leaves a path to exposure open.
+applies_to: [s3_bucket]
+test_logic:
+  collector: s3_bucket
+  operator: all_of
+  checks:
+    - check: block_public_acls
+      operator: equals
+      expected: true
+    - check: ignore_public_acls
+      operator: equals
+      expected: true
+    - check: block_public_policy
+      operator: equals
+      expected: true
+    - check: restrict_public_buckets
+      operator: equals
+      expected: true
+remediation: >
+  Enable all four Block Public Access settings on the bucket, and enable them at the
+  account level as well so newly created buckets inherit the guardrail. Before turning
+  them on, confirm the bucket is not intentionally serving public content such as a
+  static website — enabling the block will break that immediately. Where public
+  delivery is genuinely required, front the bucket with CloudFront using an origin
+  access control and keep the bucket itself private.
+scored: true

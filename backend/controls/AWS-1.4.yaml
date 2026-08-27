@@ -1,0 +1,31 @@
+id: AWS-1.4
+title: Ensure no active access keys exist on the root account
+framework_mappings:
+  cis_aws_v3: "1.4"
+  nist_csf: "PR.AC-1"
+  soc2: "CC6.1"
+  cert_in_marker: "IMP"
+severity: critical
+category: access_control
+description: >
+  Verifies that the AWS account root user has no active programmatic access keys. The
+  root user cannot be restricted by IAM policy and can perform every action in the
+  account, including closing it and removing the controls that would record what
+  happened. A long-lived access key for that identity is a credential that grants
+  unlimited power, never expires on its own, and can be used from anywhere without a
+  console login or an MFA prompt. Any legitimate automation should run under a
+  purpose-scoped IAM role instead, so this check treats the existence of an active
+  root key as a finding regardless of how carefully it is stored.
+applies_to: [aws_account]
+test_logic:
+  collector: iam_root
+  check: active_access_key_count
+  operator: equals
+  expected: 0
+remediation: >
+  In the IAM console, open the account's security credentials page, identify any root
+  access keys, and confirm what is using them before removing anything, since deleting
+  a key that automation depends on will break it. Deactivate the key first and watch
+  for failures rather than deleting immediately. Move the workload to an IAM role or a
+  dedicated IAM user with a scoped policy, then delete the root key permanently.
+scored: true

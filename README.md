@@ -17,7 +17,8 @@ anything — it defines the phase order, the schemas, and the rules the code fol
 | 2 — Normalizer + evaluator + persistence | ✅ complete, verified |
 | 3 — Historical results + drift | ✅ complete, verified |
 | 4 — Exception workflow | ✅ complete, verified |
-| 5–7 | not started |
+| 5 — AWS collector | ⚠️ code complete, **moto-mocked only** — open pending real-account validation |
+| 6–7 | not started |
 
 Latest scan of the demo VM: **3 pass, 15 fail, 16.7% compliance**, every verdict
 independently confirmed on the host.
@@ -282,6 +283,16 @@ Open findings vs accepted risk for the latest run:
 ```bash
 ./venv/Scripts/python.exe tests/verify_phase4.py --views
 ```
+
+Phase 5 — AWS collector against moto. Needs no VM, no database and no AWS account:
+
+```bash
+./venv/Scripts/python.exe tests/verify_phase5.py
+```
+
+> ⚠️ Phase 5 is verified against a **mock**, not real AWS. Its findings are not
+> trustworthy to the standard of the Linux controls until re-run against a real AWS
+> test account — see `architecture.md` §3.6.
 
 ---
 

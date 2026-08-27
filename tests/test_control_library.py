@@ -48,25 +48,42 @@ def check(label: str, condition: bool, detail: str = "") -> None:
 def test_library_loads() -> None:
     print("\nControl library:")
     controls = load_controls()
-    check("exactly 18 controls load", len(controls) == 18, f"got {len(controls)}")
+    linux = [c for c in controls if c["id"].startswith("CIS-")]
+    aws = [c for c in controls if c["id"].startswith("AWS-")]
+
+    check("exactly 18 Linux controls load", len(linux) == 18, f"got {len(linux)}")
+    check("exactly 6 AWS controls load", len(aws) == 6, f"got {len(aws)}")
+    check("24 controls total, nothing else", len(controls) == 24, f"got {len(controls)}")
     check(
-        "all ids are CIS-prefixed (no fixture contamination)",
-        all(c["id"].startswith("CIS-") for c in controls),
-        str([c["id"] for c in controls if not c["id"].startswith("CIS-")]),
+        "all ids are CIS- or AWS- prefixed (no fixture contamination)",
+        all(c["id"].startswith(("CIS-", "AWS-")) for c in controls),
+        str([c["id"] for c in controls if not c["id"].startswith(("CIS-", "AWS-"))]),
+    )
+    check(
+        "every Linux control maps to cis_linux_v8, never cis_aws_v3",
+        all("cis_linux_v8" in c["framework_mappings"] for c in linux)
+        and not any("cis_aws_v3" in c["framework_mappings"] for c in linux),
+    )
+    check(
+        "every AWS control maps to cis_aws_v3, never cis_linux_v8",
+        all("cis_aws_v3" in c["framework_mappings"] for c in aws)
+        and not any("cis_linux_v8" in c["framework_mappings"] for c in aws),
     )
 
 
 def test_cert_in_remap() -> None:
     print("\ncert_in_marker remap:")
-    controls = load_controls()
+    controls = [c for c in load_controls() if c["id"].startswith("CIS-")]
     actual = {c["id"]: c["framework_mappings"]["cert_in_marker"] for c in controls}
-    check("all 18 markers match the specified remap", actual == EXPECTED_CERT_IN,
+    check("all 18 Linux markers match the specified remap", actual == EXPECTED_CERT_IN,
           str({k: v for k, v in actual.items() if EXPECTED_CERT_IN.get(k) != v}))
-    check("MAN appears nowhere", "MAN" not in set(actual.values()))
+
+    all_markers = {c["framework_mappings"]["cert_in_marker"] for c in load_controls()}
+    check("MAN appears nowhere", "MAN" not in all_markers)
     check(
-        "every marker is in the six-marker vocabulary",
-        set(actual.values()) <= VALID_CERT_IN_MARKERS,
-        str(set(actual.values()) - VALID_CERT_IN_MARKERS),
+        "every marker (Linux and AWS) is in the six-marker vocabulary",
+        all_markers <= VALID_CERT_IN_MARKERS,
+        str(all_markers - VALID_CERT_IN_MARKERS),
     )
 
     good = copy.deepcopy(controls[0])

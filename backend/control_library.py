@@ -34,7 +34,15 @@ REQUIRED_TOP_LEVEL = {
     "scored",
 }
 
-REQUIRED_FRAMEWORK_KEYS = {"cis_linux_v8", "nist_csf", "soc2", "cert_in_marker"}
+#: Every control must carry a CIS benchmark reference, but which benchmark depends on
+#: what the control audits: the Linux set maps to CIS Linux v8, the AWS set to the CIS
+#: AWS Foundations Benchmark. Requiring the literal key `cis_linux_v8` on an AWS
+#: control would have meant either putting an AWS benchmark number under a
+#: Linux-labelled key -- actively misleading in an exported report -- or dropping the
+#: CIS mapping for AWS entirely. Exactly one of these must be present.
+CIS_FRAMEWORK_KEYS = {"cis_linux_v8", "cis_aws_v3"}
+
+REQUIRED_FRAMEWORK_KEYS = {"nist_csf", "soc2", "cert_in_marker"}
 
 #: Permitted cert_in_marker values.
 #:
@@ -218,6 +226,17 @@ def validate_control(control: dict, source: str) -> None:
     _require(isinstance(fm, dict), source, "framework_mappings must be a mapping")
     fm_missing = REQUIRED_FRAMEWORK_KEYS - set(fm)
     _require(not fm_missing, source, f"framework_mappings missing {sorted(fm_missing)}")
+
+    cis_present = CIS_FRAMEWORK_KEYS & set(fm)
+    _require(
+        len(cis_present) == 1,
+        source,
+        f"framework_mappings must carry exactly one of {sorted(CIS_FRAMEWORK_KEYS)}, "
+        f"found {sorted(cis_present)}",
+    )
+
+    unknown_fm = set(fm) - REQUIRED_FRAMEWORK_KEYS - CIS_FRAMEWORK_KEYS
+    _require(not unknown_fm, source, f"framework_mappings has unknown key(s) {sorted(unknown_fm)}")
     for key, value in fm.items():
         _require(
             isinstance(value, str) and value.strip() != "",

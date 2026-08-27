@@ -1,0 +1,32 @@
+id: AWS-2.2.1
+title: Ensure EBS volumes are encrypted at rest
+framework_mappings:
+  cis_aws_v3: "2.2.1"
+  nist_csf: "PR.DS-1"
+  soc2: "CC6.1"
+  cert_in_marker: "PRO"
+severity: high
+category: data_protection
+description: >
+  Verifies that each EBS volume has encryption at rest enabled. An unencrypted volume
+  leaves its data readable in the underlying storage layer and, more practically,
+  leaves every snapshot taken from it unencrypted too — snapshots are frequently shared
+  across accounts or made public by mistake, and an unencrypted one discloses the full
+  filesystem. Encryption also cannot be added to a volume in place: it must be applied
+  at creation, so an unencrypted volume represents rework rather than a setting to
+  toggle, which is why it is worth catching early.
+applies_to: [ebs_volume]
+test_logic:
+  collector: ebs_volume
+  check: encrypted
+  operator: equals
+  expected: true
+remediation: >
+  Encryption cannot be enabled on an existing volume. Take a snapshot, copy the
+  snapshot with encryption enabled and a chosen KMS key, create a new volume from the
+  encrypted copy, then detach the old volume and attach the new one — which requires a
+  stop/start of the instance and therefore a maintenance window. Enable EBS encryption
+  by default at the account and region level so this cannot recur, and remember to
+  delete the original unencrypted snapshot afterwards, since leaving it behind
+  preserves exactly the exposure the work was meant to remove.
+scored: true

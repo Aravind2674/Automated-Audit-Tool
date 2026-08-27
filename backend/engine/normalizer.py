@@ -470,8 +470,12 @@ def normalize(raw_docs: list[dict], collector_type: str) -> list[dict]:
     The evaluator NEVER sees collector_type -- it is consumed here and does not
     appear in the returned documents.
     """
+    # Provider dispatch happens HERE and only here. The evaluator receives canonical
+    # resource documents with no trace of where they came from (spec Section 5).
+    if collector_type == "aws":
+        return _normalize_aws(raw_docs)
+
     if collector_type != "ssh":
-        # AWS arrives in Phase 5 and will be dispatched here, not in the evaluator.
         raise NormalizationError(
             f"no normalizer registered for collector_type {collector_type!r}"
         )
@@ -500,5 +504,249 @@ def normalize(raw_docs: list[dict], collector_type: str) -> list[dict]:
                 f"parser for source {source!r} on {resource_id} failed: "
                 f"{type(exc).__name__}: {exc}"
             ) from exc
+
+    return list(resources.values())
+
+
+# ---------------------------------------------------------------------------
+# AWS parsers (Phase 5)
+#
+# Written against the real captured output in aws_raw_output_a.json, exactly as the
+# Linux parsers were written against phase1_raw_output.json. The moto-backed capture
+# is a weaker source of truth than a live host -- see architecture.md 3.6 -- but the
+# discipline of parsing observed output rather than imagined output is unchanged.
+# ---------------------------------------------------------------------------
+
+
+def _calls(doc: dict) -> list[dict]:
+    return doc.get("calls", [])
+
+
+def _find_call(doc: dict, api_prefix: str) -> dict | None:
+    for call in _calls(doc):
+        if call["api"].startswith(api_prefix):
+            return call
+    return None
+
+
+def _aws_account_id(docs: list[dict]) -> str:
+    for doc in docs:
+        if doc.get("account_id"):
+            return doc["account_id"]
+    return "unknown"
+
+
+def _parse_iam_root(doc: dict) -> dict:
+    """Root MFA and access-key state from the IAM account summary.
+
+    The summary exposes counters, not booleans: AccountMFAEnabled is 0 or 1 and
+    AccountAccessKeysPresent is a count. They are converted here so a control can
+    state a plain expectation rather than encoding AWS's representation.
+    """
+    call = _find_call(doc, "iam:GetAccountSummary")
+    if call is None or not call["ok"]:
+        return {UNAVAILABLE: "iam:GetAccountSummary failed; root account state unknown"}
+
+    summary = call["data"].get("SummaryMap", {})
+    return {
+        "mfa_enabled": bool(summary.get("AccountMFAEnabled", 0)),
+        "active_access_key_count": int(summary.get("AccountAccessKeysPresent", 0)),
+    }
+
+
+def _parse_s3_bucket(doc: dict, bucket: str) -> dict:
+    """Block Public Access flags for one bucket.
+
+    A bucket with no configuration at all raises
+    NoSuchPublicAccessBlockConfiguration. That is the strongest possible failure of
+    this control -- nothing is blocked -- so it maps to all four flags False, not to
+    UNAVAILABLE. Treating it as unreadable would report `error` for a bucket that is
+    verifiably wide open, which is precisely backwards.
+    """
+    call = _find_call(doc, "s3:GetPublicAccessBlock:" + bucket)
+    if call is None:
+        return {UNAVAILABLE: "no GetPublicAccessBlock result for bucket " + repr(bucket)}
+
+    if not call["ok"]:
+        if call["error"] == "NoSuchPublicAccessBlockConfiguration":
+            return {
+                "block_public_acls": False,
+                "ignore_public_acls": False,
+                "block_public_policy": False,
+                "restrict_public_buckets": False,
+            }
+        return {UNAVAILABLE: "s3:GetPublicAccessBlock failed: " + str(call["error"])}
+
+    cfg = call["data"].get("PublicAccessBlockConfiguration", {})
+    return {
+        "block_public_acls": bool(cfg.get("BlockPublicAcls", False)),
+        "ignore_public_acls": bool(cfg.get("IgnorePublicAcls", False)),
+        "block_public_policy": bool(cfg.get("BlockPublicPolicy", False)),
+        "restrict_public_buckets": bool(cfg.get("RestrictPublicBuckets", False)),
+    }
+
+
+#: The two "anywhere" CIDRs. A rule carrying either exposes the port to the internet.
+_ANY_V4 = "0.0.0.0/0"
+_ANY_V6 = "::/0"
+
+
+def _permission_covers_ssh(perm: dict) -> bool:
+    """True if this IpPermission reaches TCP port 22.
+
+    Three shapes all reach port 22 and all must be caught:
+      * an explicit 22-22 rule
+      * a port RANGE that contains 22 (e.g. 20-100), which a naive FromPort == 22
+        test would miss entirely
+      * IpProtocol "-1", meaning all protocols and all ports, where FromPort and
+        ToPort are absent from the response altogether
+    """
+    protocol = str(perm.get("IpProtocol", ""))
+    if protocol == "-1":
+        return True
+    if protocol.lower() not in ("tcp", "6"):
+        return False
+
+    from_port = perm.get("FromPort")
+    to_port = perm.get("ToPort")
+    if from_port is None or to_port is None:
+        return True  # unspecified range on a tcp rule means all ports
+    return int(from_port) <= 22 <= int(to_port)
+
+
+def _parse_security_group(group: dict) -> dict:
+    open_to_world = False
+    offending: list[str] = []
+
+    for perm in group.get("IpPermissions", []):
+        if not _permission_covers_ssh(perm):
+            continue
+        ports = str(perm.get("FromPort")) + "-" + str(perm.get("ToPort"))
+        for rng in perm.get("IpRanges", []):
+            if rng.get("CidrIp") == _ANY_V4:
+                open_to_world = True
+                offending.append(_ANY_V4 + " -> " + ports)
+        for rng in perm.get("Ipv6Ranges", []):
+            if rng.get("CidrIpv6") == _ANY_V6:
+                open_to_world = True
+                offending.append(_ANY_V6 + " -> " + ports)
+
+    return {
+        "unrestricted_ssh_ingress": open_to_world,
+        "group_name": group.get("GroupName"),
+        "offending_rules": offending,
+    }
+
+
+def _parse_ebs_volume(volume: dict) -> dict:
+    return {
+        "encrypted": bool(volume.get("Encrypted", False)),
+        "volume_id": volume.get("VolumeId"),
+    }
+
+
+def _parse_cloudtrail(doc: dict) -> dict:
+    """Account-level CloudTrail posture.
+
+    A trail can exist, be multi-region, and still be stopped, so "configured" and
+    "actually logging" are separate attributes. The three conditions are evaluated
+    against the SAME trail rather than across all trails independently -- otherwise a
+    stopped multi-region trail plus a running single-region trail would satisfy every
+    condition separately while leaving the account effectively unlogged.
+    """
+    describe = _find_call(doc, "cloudtrail:DescribeTrails")
+    if describe is None or not describe["ok"]:
+        return {UNAVAILABLE: "cloudtrail:DescribeTrails failed; trail state unknown"}
+
+    trails = describe["data"].get("trailList", [])
+
+    best = {
+        "multi_region_trail_exists": False,
+        "is_logging": False,
+        "management_events_all": False,
+    }
+
+    for trail in trails:
+        name = trail.get("TrailARN") or trail.get("Name")
+        if not trail.get("IsMultiRegionTrail"):
+            continue
+
+        status = _find_call(doc, "cloudtrail:GetTrailStatus:" + str(name))
+        selectors = _find_call(doc, "cloudtrail:GetEventSelectors:" + str(name))
+
+        logging = False
+        if status is not None and status["ok"]:
+            logging = bool(status["data"].get("IsLogging"))
+
+        management_all = False
+        if selectors is not None and selectors["ok"]:
+            for sel in selectors["data"].get("EventSelectors") or []:
+                if sel.get("IncludeManagementEvents") and sel.get("ReadWriteType") == "All":
+                    management_all = True
+            for adv in selectors["data"].get("AdvancedEventSelectors") or []:
+                if adv.get("Name") or adv.get("FieldSelectors"):
+                    management_all = True
+
+        candidate = {
+            "multi_region_trail_exists": True,
+            "is_logging": logging,
+            "management_events_all": management_all,
+        }
+        if sum(candidate.values()) > sum(best.values()):
+            best = candidate
+
+    return best
+
+
+def _normalize_aws(raw_docs: list[dict]) -> list[dict]:
+    by_source = {d["source"]: d for d in raw_docs}
+    account_id = _aws_account_id(raw_docs)
+    resources: dict[str, dict] = {}
+
+    def resource(resource_type: str, identifier: str) -> dict:
+        resource_id = resource_type + ":" + identifier
+        return resources.setdefault(
+            resource_id,
+            {
+                "resource_type": resource_type,
+                "resource_id": resource_id,
+                "attributes": {},
+            },
+        )
+
+    # ---- account-level resource ---------------------------------------------
+    account = resource("aws_account", account_id)
+    if "iam_root" in by_source:
+        account["attributes"]["iam_root"] = _parse_iam_root(by_source["iam_root"])
+    if "cloudtrail" in by_source:
+        account["attributes"]["cloudtrail"] = _parse_cloudtrail(by_source["cloudtrail"])
+
+    # ---- one resource per S3 bucket -----------------------------------------
+    if "s3_bucket" in by_source:
+        doc = by_source["s3_bucket"]
+        for bucket in doc.get("bucket_names", []):
+            resource("s3_bucket", bucket)["attributes"]["s3_bucket"] = _parse_s3_bucket(
+                doc, bucket
+            )
+
+    # ---- one resource per security group ------------------------------------
+    if "security_group" in by_source:
+        doc = by_source["security_group"]
+        call = _find_call(doc, "ec2:DescribeSecurityGroups")
+        if call is not None and call["ok"]:
+            for group in call["data"].get("SecurityGroups", []):
+                resource("security_group", group["GroupId"])["attributes"][
+                    "security_group"
+                ] = _parse_security_group(group)
+
+    # ---- one resource per EBS volume ----------------------------------------
+    if "ebs_volume" in by_source:
+        doc = by_source["ebs_volume"]
+        call = _find_call(doc, "ec2:DescribeVolumes")
+        if call is not None and call["ok"]:
+            for volume in call["data"].get("Volumes", []):
+                resource("ebs_volume", volume["VolumeId"])["attributes"][
+                    "ebs_volume"
+                ] = _parse_ebs_volume(volume)
 
     return list(resources.values())

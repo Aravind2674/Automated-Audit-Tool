@@ -731,6 +731,165 @@ open/accepted/total arithmetic.
   Phase 7.
 - **Legacy-host reachability** (architecture.md §3.1) remains open.
 
+---
+
+## Phase 5 — AWS collector
+
+**Date:** 2026-08-27
+**Status:** ⚠️ **Code complete, all checks pass — but verified against `moto` only.
+This is NOT the standard Phases 1-4 were held to, and Phase 5 stays OPEN until it is
+re-validated against a real AWS account.** See architecture.md 3.6.
+
+### What was built
+
+- **6 AWS control YAMLs** (`AWS-1.4`, `AWS-1.5`, `AWS-2.1.5`, `AWS-2.2.1`, `AWS-3.1`,
+  `AWS-5.2`) — exactly the set listed in Section 4, no more.
+- **`backend/collectors/aws_collector.py`** — boto3 **client interface only**.
+- **AWS parsers appended to `backend/engine/normalizer.py`**, with provider dispatch
+  added to `normalize()`.
+- **`tests/fixtures/aws_scenario_a.py`** — the scenario the collector was built
+  against.
+- **`tests/fixtures/aws_scenario_b.py`** — an independently written scenario for
+  rule 8.
+- **`tests/verify_phase5.py`** — runs both scenarios and asserts the Section 1
+  client-only constraint.
+
+### The architectural claim, now tested rather than asserted
+
+`backend/engine/evaluator.py` is **byte-identical to its Phase 4 state**. Adding an
+entire second collector type required zero evaluator changes:
+
+```
+git diff HEAD -- backend/engine/evaluator.py   ->  (no output)
+grep -niE 'collector_type|aws|boto' evaluator.py
+   -> only two hits, both in the docstring predicting exactly this
+```
+
+Provider dispatch happens in `normalize()` and nowhere else. This is the strongest
+available evidence for the extensibility claim in Section 5, because until Phase 5
+there was only one provider and the boundary had never actually been loaded.
+
+Multi-resource evaluation was also exercised for the first time. The Linux target is a
+single host; AWS produced 12 resources in scenario A (1 account, 4 buckets, 5 security
+groups, 2 volumes) and the evaluator's `applies_to` filtering fanned each control out
+across the right ones without modification.
+
+### Section 1 constraint: boto3 client interface only
+
+Asserted mechanically, not by inspection, in `tests/verify_phase5.py`:
+
+```
+PASS  no boto3.resource( in aws_collector.py
+PASS  session.client( is used
+PASS  no mutating API calls in the collector  ([])
+```
+
+The mutating-call check greps for `create_/delete_/put_/update_/modify_/terminate_/
+attach_/detach_/revoke_/authorize_` and finds none, which also evidences the
+read-only claim: the collector needs `SecurityAudit` / `ViewOnlyAccess` and nothing
+more.
+
+### Scenario A (built against) — all assertions pass
+
+```
+resources normalized: {'aws_account': 1, 's3_bucket': 4, 'security_group': 5, 'ebs_volume': 2}
+AWS-1.4 pass | AWS-1.5 fail | AWS-3.1 fail
+AWS-2.1.5  locked pass / open fail / partial fail / trail-logs fail
+AWS-5.2    0.0.0.0/0:22 fail / ::/0:22 fail / 203.0.113.0/24 pass
+AWS-2.2.1  encrypted 1, unencrypted 1
+```
+
+`s3:GetPublicAccessBlock` on a bucket with no configuration raises
+`NoSuchPublicAccessBlockConfiguration`. The collector records that as evidence rather
+than raising, and the normalizer maps it to all four flags `False` — **not** to
+`UNAVAILABLE`. A bucket with no block configuration is the strongest possible failure
+of this control; reporting `error` for a bucket that is verifiably wide open would be
+exactly backwards.
+
+### Scenario B (independent) — rule 8
+
+Written without reference to set A: no shared helpers, no shared constructors,
+different region, different names, different values. Duplication between the two
+fixture files is deliberate — two scenarios built from shared code can agree with each
+other about something neither AWS nor the collector would ever produce.
+
+Set B deliberately exercises shapes set A never produces, because a cross-check that
+only repeats the first scenario verifies nothing beyond determinism:
+
+| Case | Why it matters | Result |
+|---|---|---|
+| SG with port **range** 20-30 | a `FromPort == 22` test misses this entirely | fail ✅ |
+| SG with `IpProtocol "-1"` | all protocols/all ports; `FromPort`/`ToPort` absent from the response | fail ✅ |
+| SG open to world on **443** | proves the parser is not just flagging any `0.0.0.0/0` | pass ✅ |
+| Multi-region trail, logging, `All` selectors | the **passing** direction of AWS-3.1, which set A never reaches | pass ✅ |
+| Multi-region trail that is **stopped** | must not be the trail chosen | correctly ignored ✅ |
+
+All assertions pass, 0 mismatches.
+
+### ⚠️ Rigor reduction versus Phases 1-4 — stated plainly
+
+Every Phase 5 result above came from talking to a Python library, not to AWS.
+
+Phases 1-4 ran against a live VM over real SSH, and that is exactly how the three
+parsing traps in architecture.md 2.1 were found. A mock returns whatever its author
+expected the API to return — which, in the `systemctl is-active` case, would have been
+the wrong answer that started that whole investigation. The equivalent surprises
+almost certainly exist in the real AWS API surface, and this build has not been in a
+position to meet them.
+
+**Specific named gap: moto does not model the root user at all.**
+`AccountMFAEnabled` and `AccountAccessKeysPresent` are fixed at `0` with no way to
+change them — verified directly:
+
+```
+enable_mfa_device(UserName="root")  -> NoSuchEntityException
+create_access_key(UserName="root")  -> NoSuchEntityException
+AccountMFAEnabled stays 0; AccountAccessKeysPresent stays 0
+```
+
+Consequently **AWS-1.5 is only ever exercised in the `fail` direction and AWS-1.4 only
+in the `pass` direction.** AWS-1.4's pass is actively misleading: it passes because
+moto cannot represent a root access key, not because an account was checked and found
+clean.
+
+Parser-level tests in `tests/verify_phase5.py` cover all four MFA/key combinations and
+the `AccessDenied -> error` path, confirming the **logic** is right. A passing code
+path is not an observation about an account, and this log does not treat it as one.
+
+Also unverified under moto: pagination (real accounts paginate `ListBuckets`,
+`DescribeVolumes`, `DescribeSecurityGroups`; moto returns single pages), IAM
+permission scoping (moto does not enforce `SecurityAudit`, so a call the tool is not
+actually permitted to make still succeeds), multi-region behaviour, eventual
+consistency, throttling and partial failures.
+
+**Required to close this:** run the full Phase 5 verification against a real AWS test
+account containing deliberately misconfigured resources — the cloud equivalent of the
+demo VM — and reconcile against a hand-built answer key the way `EXPECTED_POSTURE.md`
+was reconciled for Linux.
+
+### Schema change: `framework_mappings` CIS key
+
+Requiring the literal key `cis_linux_v8` on an AWS control would have meant either
+filing an AWS Foundations Benchmark number under a Linux-labelled key — actively
+misleading in an exported report — or dropping the CIS mapping for AWS entirely. The
+validator now requires **exactly one** of `cis_linux_v8` / `cis_aws_v3`, plus
+`nist_csf`, `soc2` and `cert_in_marker` as before, and rejects unknown mapping keys.
+
+Tests assert every Linux control carries `cis_linux_v8` and never `cis_aws_v3`, and
+vice versa, so the two sets cannot drift into each other's namespace.
+
+### Deviations and open items
+
+- **`backend/collectors/aws_collector.py`** is in the Section 2 tree; the fixture
+  modules and `tests/verify_phase5.py` are not.
+- **`--controls-dir`** was added to `run_scan.py` during the Phase 3 addendum and is
+  reused here.
+- **AWS credentials come from boto3's default chain**, not `secrets_manager`
+  (Section 6) — the same deferral as the SSH collector's target dict. Marked `# TODO`.
+  Must close before Phase 7.
+- **Phase 5 is OPEN** pending real-account validation.
+- **Legacy-host reachability** (architecture.md 3.1) remains open.
+
 ### Addendum 3 — 2026-08-27, source control and collaboration setup
 
 Prompted by an imminent laptop switch and additional contributors joining.

@@ -1,0 +1,29 @@
+id: AWS-1.5
+title: Ensure multi-factor authentication is enabled for the root account
+framework_mappings:
+  cis_aws_v3: "1.5"
+  nist_csf: "PR.AC-7"
+  soc2: "CC6.1"
+  cert_in_marker: "IMP"
+severity: critical
+category: authentication
+description: >
+  Verifies that the AWS account root user has MFA enabled. The root user has
+  unrestricted authority over the account and is the one identity that cannot be
+  limited by policy, so a compromised root password without a second factor is a total
+  loss of the account. Root credentials are also a common target for credential
+  stuffing, because the sign-in identifier is simply the account's email address and is
+  often easy to discover.
+applies_to: [aws_account]
+test_logic:
+  collector: iam_root
+  check: mfa_enabled
+  operator: equals
+  expected: true
+remediation: >
+  Sign in as root, open the security credentials page and enable MFA. Prefer a
+  hardware security key or a virtual authenticator held by more than one trusted
+  administrator, and store the recovery codes somewhere retrievable that is not the
+  AWS account itself. Enabling MFA on a device only one person can reach creates a
+  different risk: losing that device can lock the organisation out of its own account.
+scored: true
