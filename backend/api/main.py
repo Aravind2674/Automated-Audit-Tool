@@ -28,7 +28,9 @@ import uuid
 
 sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
 
-from fastapi import Body, Cookie, Depends, FastAPI, HTTPException, Query, Response  # noqa: E402
+from fastapi import (  # noqa: E402
+    BackgroundTasks, Body, Cookie, Depends, FastAPI, HTTPException, Query, Response,
+)
 from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
 from fastapi.responses import StreamingResponse  # noqa: E402
 from sqlalchemy import text  # noqa: E402
@@ -105,6 +107,58 @@ def _warn_if_insecure_cookies() -> None:
             "Secure. Correct for local http development; set SECURE_COOKIES=true "
             "for any deployment behind TLS."
         )
+
+
+@app.on_event("startup")
+def _ensure_schema() -> None:
+    """Create tables once at startup.
+
+    Previously each scan trigger called create_schema(), which reflects all eight
+    tables and cost ~2.5s per request -- by itself enough to break the sub-second
+    trigger the spec requires. Doing it once here is both faster and more correct.
+    """
+    from db import create_schema
+    create_schema(get_engine())
+
+
+@app.on_event("startup")
+def _reap_orphaned_runs() -> None:
+    """Mark runs left in 'running' by a previous process as failed.
+
+    Scans execute in FastAPI BackgroundTasks, i.e. in THIS process. A scan therefore
+    cannot survive a restart or a crash — so any run still marked `running` when the
+    application starts is definitionally dead, not in progress.
+
+    Found during the async re-proof: restarting uvicorn mid-scan left run 55df169b
+    stuck on `running` forever, and the dashboard's in-flight banner reported it as an
+    active scan indefinitely. A run that never leaves `running` is indistinguishable
+    from one still working, so the UI would show a permanently-scanning system with no
+    error anywhere — worse than a visible failure.
+
+    This is the honest cost of in-process background execution and is documented as
+    such: a real job queue would let a worker resume or explicitly fail the job
+    instead. `runs` is not an append-only table, so correcting the status here is
+    permitted; the failure is additionally recorded in the append-only audit_log.
+    """
+    with _sessionmaker()() as s:
+        orphans = s.execute(text(
+            "SELECT run_id, correlation_id, triggered_by FROM runs "
+            "WHERE status = 'running'")).mappings().all()
+        for row in orphans:
+            s.execute(
+                text("UPDATE runs SET status='failed', completed_at=:t "
+                     "WHERE run_id=:r"),
+                {"t": datetime.datetime.now(datetime.timezone.utc), "r": row["run_id"]},
+            )
+            _audit(s, row["triggered_by"], "scan_failed", "error",
+                   {"reason": "orphaned by application restart -- background task "
+                              "cannot survive the process that owns it",
+                    "run_id": str(row["run_id"])},
+                   correlation_id=row["correlation_id"], run_id=row["run_id"])
+        s.commit()
+        if orphans:
+            print(f"[audit-tool] marked {len(orphans)} orphaned 'running' run(s) as "
+                  f"failed on startup")
 
 
 def _sessionmaker():
@@ -252,6 +306,14 @@ def dashboard(run_id: str | None = Query(default=None),
         exceptions = open_exceptions(conn)
         trend = compliance_trend(conn)
 
+        # Scans still in flight. The dashboard shows the latest COMPLETED run, so
+        # without this an async scan would be invisible between trigger and finish --
+        # the UI would look idle while work was happening, which is exactly the
+        # "silently block or hang" failure the async change is meant to avoid.
+        active = [dict(r) for r in conn.execute(text(
+            "SELECT run_id, triggered_by, started_at, status FROM runs "
+            "WHERE status = 'running' ORDER BY started_at DESC")).mappings()]
+
         # Drift is CAPPED before serialisation.
         #
         # Phase 8 finding: at 50 targets, drift between two runs with different target
@@ -273,6 +335,7 @@ def dashboard(run_id: str | None = Query(default=None),
                     drift.append({"kind": kind, **_jsonable(row)})
 
     return _jsonable({
+        "active_runs": active,
         "run_id": str(run),
         "generated_at": datetime.datetime.now(datetime.timezone.utc),
         "summary": summary, "per_domain": domains,
@@ -298,30 +361,77 @@ def findings(run_id: str | None = Query(default=None),
     })
 
 
-@app.post("/api/scans")
-def trigger_scan(body: dict = Body(default={}), identity=Depends(require_session)) -> dict:
+@app.post("/api/scans", status_code=202)
+def trigger_scan(background: BackgroundTasks, body: dict = Body(default={}),
+                 identity=Depends(require_session)) -> dict:
     """Trigger a scan. STATE-CHANGING -- requires a session, and is audited.
 
-    `mode="cached"` re-evaluates the stored raw collection; `mode="live"` collects
-    from the target over SSH first. Cached is the default because it is fast and
-    deterministic, which matters for a demo; live is the real thing.
+    **Fires and returns immediately (HTTP 202).** The `runs` row is created
+    synchronously with `status='running'`, then collection and evaluation run in a
+    FastAPI BackgroundTask in the same process — no Celery, no Redis, no new
+    infrastructure, which is the right weight for this deployment's scale.
+
+    This is a direct consequence of Phase 8's measurement: 50 targets took 128.42s of
+    sequential SSH, past the default idle timeout of most reverse proxies. Doing that
+    inside the request returned a gateway timeout to the browser **while the scan kept
+    running server-side** — the user sees failure, retries, and doubles the load
+    against the same hosts.
+
+    202 rather than 200 because the work is accepted, not finished. Callers poll
+    `GET /api/scans/{run_id}`, or simply watch the dashboard, which reports active
+    runs and refreshes while any are in flight.
     """
-    from run_scan import execute_scan
+    from run_scan import create_pending_run, run_pending_scan
 
     mode = str(body.get("mode", "cached"))
     if mode not in ("cached", "live"):
         raise HTTPException(400, "mode must be 'cached' or 'live'")
 
+    n_targets = int(body.get("targets", 1))
+    if not 1 <= n_targets <= 200:
+        raise HTTPException(400, "targets must be between 1 and 200")
+
+    if n_targets > 1 and mode != "live":
+        raise HTTPException(400, "targets > 1 requires mode='live'")
+
+    # Target RESOLUTION is deliberately left to the background task, not done here.
+    #
+    # Resolving the demo target shells out to `vagrant ssh-config`, which takes ~7s on
+    # this hardware. Doing it in the request made a 50-target trigger return in 7.08s
+    # -- a big improvement on 128s, but not the sub-second the spec asks for, and
+    # still enough to feel broken behind a proxy. Nothing here should touch the
+    # network before the run row exists and the response is on its way.
+
     try:
-        result = execute_scan(mode=mode, triggered_by=identity["username"])
-    except Exception as exc:  # noqa: BLE001 -- surfaced, and the attempt is audited
+        pending = create_pending_run(triggered_by=identity["username"], mode=mode,
+                                     targets=n_targets)
+    except Exception as exc:  # noqa: BLE001 -- the attempt is audited before raising
         with _sessionmaker()() as s:
             _audit(s, identity["username"], "scan_trigger_failed", "error",
                    {"mode": mode, "error": f"{type(exc).__name__}: {exc}"})
             s.commit()
-        raise HTTPException(500, f"scan failed: {type(exc).__name__}: {exc}") from exc
+        raise HTTPException(500, f"could not start scan: {exc}") from exc
 
-    return _jsonable(result)
+    background.add_task(
+        run_pending_scan,
+        run_id=pending["run_id"], correlation_id=pending["correlation_id"],
+        mode=mode, triggered_by=identity["username"], n_targets=n_targets,
+    )
+    return _jsonable({**pending, "targets": n_targets})
+
+
+@app.get("/api/scans/{run_id}")
+def scan_status(run_id: str, identity=Depends(require_session)) -> dict:
+    """Status of one run. Lets a caller poll a scan started with 202."""
+    with get_engine().connect() as conn:
+        row = conn.execute(text(
+            "SELECT run_id, status, triggered_by, started_at, completed_at "
+            "FROM runs WHERE run_id = :r"), {"r": run_id}).mappings().first()
+        if row is None:
+            raise HTTPException(404, f"no such run: {run_id}")
+        n = conn.execute(text(
+            "SELECT count(*) FROM results WHERE run_id = :r"), {"r": run_id}).scalar()
+    return _jsonable({**dict(row), "results": n})
 
 
 @app.post("/api/exceptions")

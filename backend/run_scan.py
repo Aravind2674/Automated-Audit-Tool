@@ -318,6 +318,144 @@ def execute_multi_target_scan(
         session.close()
 
 
+def create_pending_run(triggered_by: str, mode: str, targets: int = 1) -> dict:
+    """Create the `runs` row with status='running' and return immediately.
+
+    Spec Section 7 addendum: `POST /api/scans` must fire and return sub-second. The
+    row is created SYNCHRONOUSLY so the caller gets a real run_id it can poll, and the
+    dashboard can show the scan as in-flight, before any collection starts.
+
+    Phase 8 measured 128.42s of sequential SSH for 50 targets -- past the default idle
+    timeout of most reverse proxies. Doing this work inside the request would return a
+    gateway timeout to the browser while the scan kept running server-side, which is
+    the worst outcome available: the user sees failure and may retry, doubling load
+    against the same hosts.
+    """
+    from audit import AuditSink
+    from db import get_engine, get_sessionmaker
+    from models.schema import Run
+
+    run_id = uuid.uuid4()
+    correlation_id = uuid.uuid4()
+
+    # NOTE: create_schema() is deliberately NOT called here. It reflects all eight
+    # tables, and doing that on every trigger cost ~2.5s -- enough on its own to miss
+    # the sub-second requirement this function exists to satisfy. Schema creation
+    # belongs at application startup, where it happens once.
+    engine = get_engine()
+    with get_sessionmaker(engine)() as session:
+        session.add(Run(
+            run_id=run_id, correlation_id=correlation_id, triggered_by=triggered_by,
+            started_at=_now(), completed_at=None, status="running",
+        ))
+        AuditSink(session, correlation_id, run_id, actor=triggered_by).event(
+            "scan_started", "ok", {"mode": mode, "targets": targets, "async": True})
+        session.commit()
+
+    return {"run_id": str(run_id), "correlation_id": str(correlation_id),
+            "status": "running", "mode": mode, "triggered_by": triggered_by}
+
+
+def run_pending_scan(run_id: str, correlation_id: str, mode: str = "cached",
+                     triggered_by: str = "api", targets: list[dict] | None = None,
+                     n_targets: int = 1, raw_path: str | None = None) -> None:
+    """Execute a scan whose `runs` row already exists, then mark it completed.
+
+    Runs in a FastAPI BackgroundTask -- same process, no Celery, no Redis, which is
+    the right weight for this deployment's scale.
+
+    Any failure sets status='failed' rather than leaving the row stuck on 'running'
+    forever. A run that never leaves 'running' is indistinguishable from one still in
+    progress, so the dashboard would show a permanently-scanning system with no error
+    anywhere -- worse than a visible failure.
+    """
+    from audit import AuditSink
+    from db import get_engine, get_sessionmaker
+    from models.schema import Result, Run
+
+    run_uuid = uuid.UUID(str(run_id))
+    corr_uuid = uuid.UUID(str(correlation_id))
+    controls = load_controls()
+    session = get_sessionmaker(get_engine())()
+
+    try:
+        sink = AuditSink(session, corr_uuid, run_uuid, actor=triggered_by)
+        persist_controls(session, controls)
+        session.commit()
+
+        # ---- collect ---------------------------------------------------------
+        if mode == "live" or targets:
+            linux_controls = [c for c in controls if "linux_server" in c["applies_to"]]
+            sources = required_sources(linux_controls)
+            if targets:
+                to_scan = targets
+            else:
+                # Resolved HERE, not in the request handler: `vagrant ssh-config`
+                # takes ~7s and would otherwise sit in front of the 202 response.
+                base = target_from_vagrant_ssh_config()
+                to_scan = []
+                for i in range(max(1, n_targets)):
+                    t = dict(base)
+                    if i:
+                        t["target_id"] = f"{base['target_id']}-clone-{i:03d}"
+                    to_scan.append(t)
+            resources = []
+            for target in to_scan:
+                t = dict(target)
+                t.setdefault("sources", sources)
+                collector = SSHCollector(
+                    db_session=session, actor=triggered_by,
+                    correlation_id=corr_uuid, run_id=run_uuid,
+                )
+                resources.extend(normalize(collector.collect(t), "ssh"))
+                session.commit()
+        else:
+            path = pathlib.Path(raw_path or (REPO_ROOT / "phase1_raw_output.json"))
+            raw_docs = json.loads(path.read_text(encoding="utf-8"))
+            resources = normalize(raw_docs, raw_docs[0]["collector_type"])
+
+        # ---- evaluate + persist ---------------------------------------------
+        all_results = []
+        for control in controls:
+            all_results.extend(evaluate(
+                control, resources, audit_sink=sink,
+                correlation_id=str(corr_uuid), run_id=str(run_uuid),
+                actor=triggered_by,
+            ))
+
+        evaluated_at = _now()
+        for result in all_results:
+            session.add(Result(
+                result_id=uuid.uuid4(), run_id=run_uuid,
+                control_id=result["control_id"], resource_id=result["resource_id"],
+                outcome=result["outcome"], evidence=result["evidence"],
+                evaluated_at=evaluated_at,
+            ))
+
+        run = session.get(Run, run_uuid)
+        run.completed_at = _now()
+        run.status = "completed"
+        sink.event("scan_completed", "ok",
+                   {"results": len(all_results), "resources": len(resources)})
+        session.commit()
+
+    except Exception as exc:  # noqa: BLE001 -- recorded, never left hanging
+        session.rollback()
+        try:
+            run = session.get(Run, run_uuid)
+            if run is not None:
+                run.status = "failed"
+                run.completed_at = _now()
+            AuditSink(session, corr_uuid, run_uuid, actor=triggered_by).event(
+                "scan_failed", "error",
+                {"error": f"{type(exc).__name__}: {exc}"})
+            session.commit()
+        except Exception:
+            session.rollback()
+    finally:
+        session.close()
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--from-vagrant-ssh-config", action="store_true")

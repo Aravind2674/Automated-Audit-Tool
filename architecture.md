@@ -424,6 +424,32 @@ Default `false` so a fresh clone works on localhost. **Any real deployment must 
 startup, so a misconfigured production instance announces itself rather than being
 silently insecure.
 
+### 3.9 Background scans assume a SINGLE-PROCESS deployment
+
+Scans run in FastAPI `BackgroundTasks` — in the same process that served the request.
+Two consequences follow, and both are load-bearing assumptions rather than details:
+
+**A scan cannot outlive its process.** Restart or crash uvicorn mid-scan and the work
+stops; there is no queue to resume from. The startup reaper therefore treats *any* run
+still marked `running` when the application starts as dead and marks it `failed`,
+recording the reason in the append-only `audit_log`. That inference — "running at
+startup means dead" — **is only valid because exactly one process owns these runs.**
+
+**It breaks under horizontal scaling.** Run two or more application instances against
+the same database and the reaper becomes actively harmful: instance B starting up
+would mark instance A's genuinely in-flight scans as failed, while A carries on
+working and eventually writes results for a run the database says failed. The same
+applies to `uvicorn --workers N`, which is multi-process.
+
+So: **this deployment must run a single application process.** If that ever changes,
+the reaper must go first, replaced by either an owner/heartbeat column on `runs` (so a
+process only reaps its own) or a real job queue whose worker can resume or explicitly
+fail a job.
+
+This is the same category of documented, deliberate constraint as Fernet key custody
+(§4) and legacy-SSH unreachability (§3.1): appropriate for the scale this is built
+for, stated plainly rather than discovered later.
+
 ---
 
 ## 4. Technology rationale

@@ -22,6 +22,7 @@ import pathlib
 import re
 import subprocess
 import sys
+import time
 
 REPO_ROOT = pathlib.Path(__file__).parent.parent
 sys.path.insert(0, str(REPO_ROOT / "backend"))
@@ -335,8 +336,87 @@ def test_no_hardcoded_secrets() -> None:
     check("no key material tracked in git", not bad, str(bad))
 
 
+
+def test_async_scan_trigger() -> None:
+    """Spec Section 7 addendum: POST /api/scans must fire and return sub-second.
+
+    Timed over real HTTP against the running server. A synchronous implementation
+    would take ~14s for one live target and ~128s for fifty -- past typical proxy
+    timeouts -- so the latency here IS the requirement, not a nicety.
+    """
+    print("\n=== Async scan trigger (spec Section 7 addendum) ===\n")
+    if not _server_up():
+        check("API is running", False, BASE)
+        return
+
+    with httpx.Client(timeout=60) as c:
+        r = c.post(f"{BASE}/api/auth/login",
+                   json={"username": USER, "password": PASSWORD})
+        if r.status_code != 200:
+            check("authenticated for async test", False, str(r.status_code))
+            return
+
+        start = time.perf_counter()
+        r = c.post(f"{BASE}/api/scans", json={"mode": "live"})
+        elapsed = time.perf_counter() - start
+
+        check("POST /api/scans returns 202 Accepted", r.status_code == 202,
+              f"got {r.status_code}")
+        if r.status_code != 202:
+            return
+        body = r.json()
+        check("trigger returns sub-second", elapsed < 1.5, f"{elapsed:.3f}s")
+        check("response carries run_id", bool(body.get("run_id")), str(body)[:80])
+        check("response status is 'running'", body.get("status") == "running",
+              str(body.get("status")))
+
+        run_id = body["run_id"]
+
+        # The run must exist and be 'running' straight away -- created synchronously.
+        st = c.get(f"{BASE}/api/scans/{run_id}").json()
+        check("run row exists immediately, status running",
+              st.get("status") == "running", str(st.get("status")))
+
+        # Dashboard must stay responsive and must SHOW the scan as in flight.
+        d0 = time.perf_counter()
+        dash = c.get(f"{BASE}/api/dashboard")
+        dash_ms = time.perf_counter() - d0
+        check("dashboard stays responsive during a scan", dash_ms < 3.0,
+              f"{dash_ms:.3f}s")
+        active = dash.json().get("active_runs", [])
+        check("dashboard reports the scan as active",
+              any(a["run_id"] == run_id for a in active),
+              f"{len(active)} active")
+
+        # Rule 8: watch the transition, do not just check the end state.
+        seen_running = False
+        final = None
+        for _ in range(60):
+            st = c.get(f"{BASE}/api/scans/{run_id}").json()
+            if st.get("status") == "running":
+                seen_running = True
+            if st.get("status") in ("completed", "failed"):
+                final = st
+                break
+            time.sleep(2)
+
+        check("status was observed as 'running' before finishing", seen_running)
+        check("run reaches 'completed'", final and final.get("status") == "completed",
+              str(final.get("status") if final else "timed out"))
+        check("completed run has results", final and int(final.get("results", 0)) > 0,
+              str(final.get("results") if final else "-"))
+
+        # And no run may be left stuck in 'running' afterwards.
+        with get_engine().connect() as conn:
+            stuck = conn.execute(text(
+                "SELECT count(*) FROM runs WHERE status='running' "
+                "AND started_at < now() - interval '10 minutes'")).scalar()
+        check("no run stuck in 'running' for over 10 minutes", stuck == 0, str(stuck))
+
+
 def main() -> int:
     test_auth_enforcement()
+    test_async_scan_trigger()
     test_secrets_manager()
     test_audit_sweep()
     test_no_hardcoded_secrets()

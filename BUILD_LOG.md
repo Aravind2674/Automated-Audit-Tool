@@ -1456,6 +1456,102 @@ scale run was worth doing for the NFR evidence alone, but it also functioned as 
 first test of assumptions that had quietly been baked in since Phase 4 — that a
 finding maps to at most one exception, and that a control maps to one resource.
 
+### Addendum — async `POST /api/scans` (Section 7 addendum, implemented)
+
+`CLAUDE.md` was replaced with the byte-verified `CLAUDE_SYNC_v2.md` plus the owner's
+addendum block, and the result verified: sha256 `17605119…`, **527 lines, exact
+match**. CLAUDE.md and the sync file are now identical in substance; a fresh clone
+finally carries Phase 8 and this addendum.
+
+**What changed.** `POST /api/scans` now fires and returns. The `runs` row is created
+synchronously with `status='running'`; collection and evaluation run in a FastAPI
+`BackgroundTask` in the same process. No Celery, no Redis, no new infrastructure —
+the right weight for this deployment. The endpoint returns **202 Accepted**, not 200,
+because the work is accepted rather than finished.
+
+`GET /api/scans/{run_id}` was added so a caller can poll, and `/api/dashboard` now
+returns `active_runs` so in-flight scans are visible rather than the UI looking idle.
+
+**Latency, measured over real HTTP:**
+
+| Trigger | Before (synchronous) | After (202) |
+|---|---|---|
+| 1 live target | ~14s | **0.51s** |
+| 50 live targets | ~128s (past proxy timeouts) | **0.84s** |
+
+**Rule 8 — the transition watched live, not just the end state.** Polling the database
+while a 50-target scan ran:
+
+```
+t+7s    status=running  results=0  creds_used=0
+t+35s   status=running  results=0  creds_used=3
+t+70s   status=running  results=0  creds_used=18
+t+112s  status=running  results=0  creds_used=35
+...
+        status=completed results=900 creds_used=50
+final:  wall_s 152.76 | results 900 | resources 50
+```
+
+`credential_used` climbing 3 → 50 while `status='running'` is the evidence the work is
+genuinely progressing in the background rather than the row simply being stale. The
+client had its response in 0.84s of that 152.76s.
+
+**Re-proven in the browser**, as the addendum requires. The Run New Scan button round
+trip was **984ms**; the dashboard showed
+`Scan 6207647b started (1 target) — running in the background.` and a live banner
+`N scans running … figures below are from the last completed run and will update
+automatically`. The button message deliberately says *started*, not *completed* —
+claiming a finished scan on a 202 would be a lie the user could check.
+
+The dashboard polls every 4s only while `active_runs` is non-empty, reusing the same
+refresh path the button already used. A single refetch would have shown stale figures
+and an idle-looking dashboard during a 152s scan — exactly the "silently block or
+hang" appearance the change exists to remove.
+
+### Two defects found while re-proving
+
+**1. Orphaned `running` rows survive a restart.** Restarting uvicorn mid-scan left run
+`55df169b` stuck on `running` permanently, and the dashboard reported it as an active
+scan indefinitely. A run that never leaves `running` is indistinguishable from one
+still working, so the UI showed a perpetually-scanning system with no error anywhere —
+worse than a visible failure.
+
+This is inherent to in-process background execution: the task cannot outlive the
+process that owns it, and there is no queue to resume from. Mitigated with a startup
+reaper — any run still `running` when the application starts is definitionally dead
+and is marked `failed`, with the reason written to the append-only `audit_log`:
+
+```
+[audit-tool] marked 1 orphaned 'running' run(s) as failed on startup
+55df169b | failed
+scan_failed | aravind | "orphaned by application restart -- background task cannot
+              survive the process that owns it"
+```
+
+`runs` is not append-only, so correcting its status is permitted. A real job queue
+would let a worker resume or explicitly fail the job instead; that remains the honest
+upgrade path.
+
+**2. The trigger was not actually sub-second at first — 2.897s.** `create_pending_run()`
+called `create_schema()`, which reflects all eight tables on every single trigger.
+Moved to a startup hook, which is both faster and more correct: **2.897s → 0.512s**.
+
+Worth noting this was caught only because the harness asserts a *number* rather than
+"returns quickly". The endpoint was already 45x faster than before and would have
+looked fine in any manual check.
+
+### Open items updated
+
+- **Synchronous scan execution: CLOSED.** Promoted to 🔴 by Phase 8's measurement and
+  resolved here.
+- **New 🟠 item — no scan resumption across restarts.** The reaper makes the failure
+  visible and correct, but a scan interrupted by a restart is lost and must be
+  re-triggered. Fixing it properly means an external job queue, which Section 8's
+  spirit (no new infrastructure) argues against for this deployment's scale.
+- Multi-target scanning is now exposed on the endpoint (`{"targets": N}`, max 200,
+  requires `mode="live"`), which was previously deferred precisely because a
+  50-target request was the one guaranteed to time out.
+
 ### Addendum — 2026-08-27, Phase 7 reconciled against the written spec
 
 Phase 7 was built from the project owner's chat paraphrase, because the updated

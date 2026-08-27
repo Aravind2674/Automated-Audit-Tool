@@ -44,6 +44,7 @@ type Payload = {
   per_domain: Domain[]; open_findings_by_severity: Record<string, number>;
   exceptions: Exc[]; trend: TrendRow[]; drift_since_previous_run: DriftRow[];
   drift_counts: Record<string, number>; drift_total: number; drift_row_cap: number;
+  active_runs: { run_id: string; triggered_by: string; started_at: string; status: string }[];
   viewer: string;
 };
 
@@ -128,6 +129,19 @@ export default function Dashboard() {
       .catch((e) => setError(String(e)));
   }, [reloadKey]);
 
+  // While any scan is in flight, refresh until it finishes.
+  //
+  // POST /api/scans returns 202 immediately and the work continues in the
+  // background, so a single refetch on trigger would show stale data and a dashboard
+  // that looks idle while a scan is running -- the "silently block or hang"
+  // appearance the async change exists to avoid. This is the same refresh path the
+  // button already used, just repeated until active_runs empties.
+  useEffect(() => {
+    if (!data?.active_runs?.length) return;
+    const id = setInterval(() => setReloadKey((k) => k + 1), 4000);
+    return () => clearInterval(id);
+  }, [data?.active_runs?.length]);
+
   // FR5: "the same audit can be re-executed on demand" -- a user-facing action, not
   // a developer running a Python file. Hits the authenticated POST /api/scans and
   // reloads so the new run_id becomes the dashboard's latest completed run.
@@ -147,7 +161,11 @@ export default function Dashboard() {
       if (r.status === 401) { setNeedsLogin(true); return; }
       const body = await r.json();
       if (!r.ok) { setScanMsg(`Scan failed: ${body.detail ?? r.status}`); return; }
-      setScanMsg(`New run ${String(body.run_id).slice(0, 8)} — ${body.results} results, ${body.compliance_pct}% compliant`);
+      // 202 Accepted: the scan has STARTED, not finished. Saying otherwise would be
+      // a lie the user could check.
+      setScanMsg(
+        `Scan ${String(body.run_id).slice(0, 8)} started (${body.targets ?? 1} target${(body.targets ?? 1) > 1 ? "s" : ""}) — running in the background.`
+      );
       setReloadKey((k) => k + 1);
     } catch (e) {
       setScanMsg(`Scan failed: ${String(e)}`);
@@ -196,6 +214,17 @@ export default function Dashboard() {
           </button>
         </div>
       </header>
+
+      {data.active_runs?.length > 0 && (
+        <div className="flex items-center gap-3 rounded-md bg-blue-50 p-3 text-sm text-blue-900 ring-1 ring-blue-200">
+          <span className="inline-block h-3 w-3 animate-pulse rounded-full bg-blue-600" />
+          <span>
+            <b>{data.active_runs.length} scan{data.active_runs.length > 1 ? "s" : ""} running.</b>{" "}
+            {data.active_runs.map((r) => `${r.run_id.slice(0, 8)} (by ${r.triggered_by})`).join(", ")}
+            {" — "}figures below are from the last completed run and will update automatically.
+          </span>
+        </div>
+      )}
 
       {scanMsg && (
         <p className="rounded-md bg-teal-50 p-3 text-sm text-teal-900 ring-1 ring-teal-200">
