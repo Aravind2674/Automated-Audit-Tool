@@ -41,6 +41,15 @@ yarn-error.log*
 *.box
 
 # ---------------------------------------------------------------------------
+# Full database dumps (pg_dump). Used to carry real data between the owner's own
+# machines (e.g. a laptop switch) via OneDrive, since this repo folder already
+# lives under OneDrive -- NOT for git. A dump contains bcrypt password hashes and
+# Fernet-ciphertext credentials; low risk on their own, but a full DB export has no
+# business in a public GitHub repo regardless. See README "Moving to a new machine".
+# ---------------------------------------------------------------------------
+*.dump
+
+# ---------------------------------------------------------------------------
 # Collected audit evidence -- DELIBERATELY NOT IGNORED.
 #
 # Spec Section 11: small evidence artifacts (e.g. phase1_raw_output.json) are part

@@ -1,12 +1,12 @@
 import AppShell from "@/components/AppShell";
-import OverviewContent from "@/components/OverviewContent";
+import FindingsContent from "@/components/FindingsContent";
 
 export const dynamic = "force-dynamic";
 
 export default function Page() {
   return (
-    <AppShell title="Overview">
-      <OverviewContent />
+    <AppShell title="Findings">
+      <FindingsContent />
     </AppShell>
   );
 }

@@ -1998,3 +1998,103 @@ owner should confirm nothing further was truncated.
 - **Phase 2 evaluator must implement exactly the operator set** declared in
   `control_library.LEAF_OPERATORS` and `COMPOSITE_OPERATORS`; the validator already
   refuses anything outside it.
+
+---
+
+## Post-Phase-8 — Stitch mockup → real UI, live scan progress, exception workflow polish
+
+Not a numbered spec phase; a UI/UX pass rebuilding the frontend against Stitch-
+generated design mockups with real data, plus two real backend defects the pass
+exposed. Dated 2026-08-28/29.
+
+### Real bugs found and fixed (not cosmetic)
+
+1. **Login silently "did nothing."** Root cause: the frontend hardcoded
+   `http://127.0.0.1:8000` as the API base regardless of which hostname the app was
+   actually viewed from. Viewing at `http://localhost:3000` while the API target was
+   `127.0.0.1:8000` makes them different *sites* for cookie purposes — a
+   `SameSite=Lax` session cookie set by a cross-site `fetch()` is never sent back on
+   the next cross-site `fetch()`. Login POST silently succeeded and set the cookie;
+   the app's own next `GET /api/dashboard` didn't carry it, got 401, and the app
+   correctly (if confusingly) fell back to the login screen. Fixed by deriving the
+   API host from `window.location.hostname` (`frontend/lib/dashboard-context.tsx`).
+   Verified via curl cookie-jar round-trip (login → reuse cookie → 200) proving the
+   session mechanism itself was never broken, then confirmed the fix in a real
+   browser session.
+
+2. **Live scan progress had no real data to show.** `run_pending_scan` batched every
+   control's results into one commit at the very end of evaluation, so a poller
+   watching `GET /api/scans/{run_id}` mid-scan saw `results: 0` the whole time, then
+   a jump to N at completion — nothing to animate honestly. Fixed by committing
+   per-control instead (`backend/run_scan.py`) — same final rows, same final commit
+   for `run.status`, only the *visibility timing* to a concurrent reader changed.
+   Added `targets_collected`/`total_targets` (from existing `credential_used` audit
+   rows, which were already committed per-target) and `controls_evaluated`/
+   `total_controls` to `GET /api/scans/{run_id}` (`backend/api/main.py`) — both
+   derived from data that already existed, zero schema changes.
+   **Evidence**: polled a real 20-target live scan every 2s —
+   `targets_collected` climbed 2→20 over ~40 real seconds before evaluation
+   (`controls_evaluated`/`results`) landed in one fast burst at the end, exactly
+   matching the collection-then-evaluation shape of the real pipeline.
+
+3. **Pending exception requests were invisible everywhere.** `open_exceptions()`
+   (`WHERE approved_by IS NOT NULL`) is correct for the PDF report — a not-yet-
+   reviewed request must never appear as if already accepted — but it also fed the
+   dashboard's `exceptions` list, so a freshly-requested exception never showed up on
+   the Exceptions page's review queue at all, regardless of reload. Fixed by adding a
+   separate `pending_exceptions()` query (`backend/queries.py`) merged into
+   `GET /api/dashboard` only, leaving `open_exceptions()` and the PDF report
+   untouched. Found via the exact "request → approve" walkthrough the design brief
+   asked to be demonstrated end-to-end, not by code review.
+
+### Real endpoint added
+
+`GET /api/runs` — every run regardless of status, via `LEFT JOIN results` instead of
+`compliance_trend`'s inner join (which silently excludes any run with zero results,
+i.e. every failed run). Found a real failed run in the existing data
+(`06530077…`, `status='failed'`, 0 results) that the trend chart had been hiding.
+Row-capped at 100 (`RUNS_ROW_CAP`), same pattern as the existing drift-row cap.
+
+### Frontend rebuild
+
+Extracted the design system (color/type/spacing tokens, severity/status pill
+patterns) from 5 Stitch HTML mockups into a real token set (`tailwind.config.js`),
+reconciling 3 conflicting severity palettes and 2 conflicting status-pill palettes
+into one canonical treatment each (documented in `components/Badges.tsx`). Built all
+5 pages (Overview, Findings, History, Exceptions, Runs) as real React components
+bound to the actual API — no hardcoded mockup numbers anywhere. Sidebar/Header/logo
+unified into one pattern used identically across all 5 pages (mockups disagreed on
+all three). Omitted Settings/Support from nav (confirmed with project owner — neither
+corresponds to anything built) and Revoke/Deny exception actions (confirmed via
+direct backend inspection that no endpoint, status value, or mutation path exists for
+either; deferred rather than half-built).
+
+Added: live progress bar (real two-phase collect/evaluate data), `AnimatedNumber`
+(tweened value transitions), `LiveIndicator` (ticking "updated Xs ago"), skeleton
+loading states shaped like each real layout, full request-exception → approve (or
+real 403 on SoD violation) flow.
+
+### Verification note on tooling, not the app
+
+The sandboxed browser pane's screenshot/zoom actions failed all session
+("pane not displayed, not compositing frames") — a client-display issue, not a code
+defect; confirmed by testing across fresh tabs and a preview restart, all identical.
+Everything above was verified through DOM text extraction, console tracing, and
+network inspection instead of screenshots, and is real evidence, but visual fidelity
+(hover/focus states, spacing, whether skeletons read as intentional) was NOT
+confirmed by this session and is called out as unverified rather than assumed fine.
+Separately: simulated mouse clicks in that same pane were unreliable (same
+compositing issue); real `.click()` calls issued via the JS-execution tool worked
+correctly throughout and were used for verification instead.
+
+### Machine migration prep (CLAUDE.md Section 11)
+
+Confirmed no hardcoded machine-specific paths anywhere in source (only `.pyc`/`.next`
+build-artifact metadata, both gitignored and regenerated fresh on any machine). Took
+a `pg_dump` backup (`audit_tool_db_backup.dump`, gitignored, travels via this
+project's own OneDrive sync, not git) ahead of a laptop switch, preserving real run/
+exception history rather than starting the new machine from an empty database.
+**Flagged explicitly**: the migrated database's Fernet-encrypted stored credential
+only decrypts under the exact `SECRETS_KEY` it was encrypted with — the new laptop's
+`.env` must reuse the same key, not generate a fresh one, or `store-vagrant-key` must
+be re-run after restore.

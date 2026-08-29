@@ -415,22 +415,31 @@ def run_pending_scan(run_id: str, correlation_id: str, mode: str = "cached",
             resources = normalize(raw_docs, raw_docs[0]["collector_type"])
 
         # ---- evaluate + persist ---------------------------------------------
+        # Committed per-control, not batched into a single commit at the end. A
+        # caller polling GET /api/scans/{run_id} mid-run (e.g. the dashboard) reads
+        # `results` via a separate connection, and Postgres's default READ COMMITTED
+        # isolation means each per-control commit becomes visible to that poller
+        # immediately -- so the count it sees genuinely grows as evaluation happens,
+        # rather than jumping from 0 to N at the very end. Same final rows, same
+        # final commit for run.status either way; the only change is *when* each
+        # control's results become visible to a concurrent reader.
         all_results = []
         for control in controls:
-            all_results.extend(evaluate(
+            control_results = evaluate(
                 control, resources, audit_sink=sink,
                 correlation_id=str(corr_uuid), run_id=str(run_uuid),
                 actor=triggered_by,
-            ))
-
-        evaluated_at = _now()
-        for result in all_results:
-            session.add(Result(
-                result_id=uuid.uuid4(), run_id=run_uuid,
-                control_id=result["control_id"], resource_id=result["resource_id"],
-                outcome=result["outcome"], evidence=result["evidence"],
-                evaluated_at=evaluated_at,
-            ))
+            )
+            evaluated_at = _now()
+            for result in control_results:
+                session.add(Result(
+                    result_id=uuid.uuid4(), run_id=run_uuid,
+                    control_id=result["control_id"], resource_id=result["resource_id"],
+                    outcome=result["outcome"], evidence=result["evidence"],
+                    evaluated_at=evaluated_at,
+                ))
+            all_results.extend(control_results)
+            session.commit()
 
         run = session.get(Run, run_uuid)
         run.completed_at = _now()

@@ -1,8 +1,9 @@
 "use client";
 
+import Image from "next/image";
 import { useState } from "react";
 
-const API = process.env.NEXT_PUBLIC_API_BASE || "http://127.0.0.1:8000";
+import { API } from "../lib/dashboard-context";
 
 /**
  * Session login. The session id never reaches this component: the API sets an
@@ -43,44 +44,47 @@ export default function Login({ onSuccess }: { onSuccess: () => void }) {
   }
 
   return (
-    <main className="flex min-h-screen items-center justify-center p-6">
-      <form onSubmit={submit}
-            className="w-full max-w-sm space-y-4 rounded-lg bg-white p-6 shadow-sm ring-1 ring-slate-200">
-        <div>
-          <h1 className="text-xl font-semibold">IT Systems Audit Tool</h1>
-          <p className="mt-1 text-xs text-slate-500">Sign in to view compliance data.</p>
+    <main className="flex min-h-screen items-center justify-center bg-surface p-6">
+      <form
+        onSubmit={submit}
+        className="w-full max-w-sm space-y-md rounded-lg border border-outline-variant bg-surface-container-lowest p-lg"
+      >
+        <div className="flex items-center gap-sm">
+          <Image src="/audittool_logo.png" alt="AuditTool" width={36} height={36} className="rounded" />
+          <div>
+            <h1 className="font-headline-sm text-headline-sm font-bold text-primary">AuditTool</h1>
+            <p className="font-body-sm text-body-sm text-on-surface-variant">Sign in to continue</p>
+          </div>
         </div>
 
         <label className="block">
-          <span className="text-xs font-medium uppercase tracking-wide text-slate-500">
-            Username
-          </span>
-          <input value={username} onChange={(e) => setUsername(e.target.value)}
-                 autoComplete="username" required
-                 className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm
-                            focus:border-slate-500 focus:outline-none" />
+          <span className="font-label-caps text-label-caps uppercase text-on-surface-variant">Username</span>
+          <input
+            value={username} onChange={(e) => setUsername(e.target.value)}
+            autoComplete="username" required
+            className="mt-1 w-full rounded border border-outline-variant bg-surface px-sm py-sm font-body-md text-body-md text-on-surface focus:border-primary focus:outline-none"
+          />
         </label>
 
         <label className="block">
-          <span className="text-xs font-medium uppercase tracking-wide text-slate-500">
-            Password
-          </span>
-          <input type="password" value={password}
-                 onChange={(e) => setPassword(e.target.value)}
-                 autoComplete="current-password" required
-                 className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm
-                            focus:border-slate-500 focus:outline-none" />
+          <span className="font-label-caps text-label-caps uppercase text-on-surface-variant">Password</span>
+          <input
+            type="password" value={password} onChange={(e) => setPassword(e.target.value)}
+            autoComplete="current-password" required
+            className="mt-1 w-full rounded border border-outline-variant bg-surface px-sm py-sm font-body-md text-body-md text-on-surface focus:border-primary focus:outline-none"
+          />
         </label>
 
         {error && (
-          <p className="rounded-md bg-red-50 p-2 text-xs text-red-800 ring-1 ring-red-200">
+          <p className="rounded border border-error-container bg-error-container px-sm py-sm font-body-sm text-body-sm text-on-error-container">
             {error}
           </p>
         )}
 
-        <button type="submit" disabled={busy}
-                className="w-full rounded-md bg-slate-800 px-4 py-2 text-sm font-medium
-                           text-white hover:bg-slate-700 disabled:opacity-50">
+        <button
+          type="submit" disabled={busy}
+          className="w-full rounded bg-primary px-md py-sm font-body-md text-body-md font-semibold text-on-primary transition-opacity hover:opacity-90 disabled:opacity-50"
+        >
           {busy ? "Signing in…" : "Sign in"}
         </button>
       </form>

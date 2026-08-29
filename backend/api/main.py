@@ -51,6 +51,7 @@ from queries import (  # noqa: E402
     findings_for_report,
     latest_completed_run,
     open_exceptions,
+    pending_exceptions,
     per_domain_breakdown,
     severity_breakdown,
 )
@@ -303,7 +304,11 @@ def dashboard(run_id: str | None = Query(default=None),
         summary = dashboard_summary(conn, run)
         domains = per_domain_breakdown(conn, run)
         severities = severity_breakdown(conn, run)
-        exceptions = open_exceptions(conn)
+        # The dashboard's exceptions list is a review queue as well as a record of
+        # accepted risk, so it includes pending_review rows too -- open_exceptions()
+        # alone (approved_by IS NOT NULL) is reused as-is for the PDF report, where a
+        # not-yet-reviewed request must never appear as if already accepted.
+        exceptions = open_exceptions(conn) + pending_exceptions(conn)
         trend = compliance_trend(conn)
 
         # Scans still in flight. The dashboard shows the latest COMPLETED run, so
@@ -359,6 +364,41 @@ def findings(run_id: str | None = Query(default=None),
         "run_id": str(run),
         "findings": [{**r, "provider": _provider(r["control_id"])} for r in rows],
     })
+
+
+RUNS_ROW_CAP = 100
+
+
+@app.get("/api/runs")
+def list_runs(identity=Depends(require_session)) -> dict:
+    """Every run, regardless of outcome -- for the Runs page.
+
+    `compliance_trend` (used on the Overview trend chart) deliberately joins on
+    `results` and filters to `status='completed'`, so a failed run -- one that never
+    produced a single result row -- silently doesn't appear there at all. That's
+    fine for a compliance trend line, where a run with no results has nothing to
+    plot, but wrong for a page whose whole purpose is showing what actually
+    happened: a failed or still-running scan is a real, current state, not a gap.
+    This uses a LEFT JOIN so every run appears, with zero counts where results
+    don't exist yet (or never will).
+    """
+    with get_engine().connect() as conn:
+        total = conn.execute(text("SELECT count(*) FROM runs")).scalar()
+        rows = [dict(r) for r in conn.execute(text(
+            "SELECT r.run_id, r.triggered_by, r.started_at, r.completed_at, r.status, "
+            "count(res.result_id) AS total, "
+            "count(*) FILTER (WHERE res.outcome = 'pass') AS passed, "
+            "count(*) FILTER (WHERE res.outcome = 'fail') AS failed, "
+            "count(*) FILTER (WHERE res.outcome = 'error') AS errored, "
+            "count(*) FILTER (WHERE res.outcome = 'manual_review') AS manual_review, "
+            "round(100.0 * count(*) FILTER (WHERE res.outcome = 'pass') "
+            "  / NULLIF(count(*) FILTER (WHERE res.outcome IN ('pass', 'fail')), 0), 1"
+            ") AS compliance_pct "
+            "FROM runs r LEFT JOIN results res ON res.run_id = r.run_id "
+            "GROUP BY r.run_id, r.triggered_by, r.started_at, r.completed_at, r.status "
+            "ORDER BY r.started_at DESC LIMIT :cap"),
+            {"cap": RUNS_ROW_CAP}).mappings()]
+    return _jsonable({"runs": rows, "total": total, "row_cap": RUNS_ROW_CAP})
 
 
 @app.post("/api/scans", status_code=202)
@@ -422,7 +462,22 @@ def trigger_scan(background: BackgroundTasks, body: dict = Body(default={}),
 
 @app.get("/api/scans/{run_id}")
 def scan_status(run_id: str, identity=Depends(require_session)) -> dict:
-    """Status of one run. Lets a caller poll a scan started with 202."""
+    """Status of one run. Lets a caller poll a scan started with 202.
+
+    `controls_evaluated` / `total_controls` give a real progress fraction during the
+    evaluation phase -- distinct control_id count is genuinely incremental now that
+    run_pending_scan commits per control rather than in one batch at the end.
+
+    `targets_collected` / `total_targets` cover the *other* phase, which dominates
+    wall-clock time for anything beyond one target (Phase 8: 128s of sequential SSH
+    for 50 targets, almost all of it before a single result row exists). Every
+    collector credential lookup writes a `credential_used` audit_log row carrying
+    run_id (Section 6) and is committed per-target already -- so counting those rows
+    is a real, already-existing signal, not a new one built just to animate a bar.
+    `total_targets` comes from the `scan_started` event's own recorded detail.
+    """
+    from control_library import load_controls
+
     with get_engine().connect() as conn:
         row = conn.execute(text(
             "SELECT run_id, status, triggered_by, started_at, completed_at "
@@ -431,7 +486,24 @@ def scan_status(run_id: str, identity=Depends(require_session)) -> dict:
             raise HTTPException(404, f"no such run: {run_id}")
         n = conn.execute(text(
             "SELECT count(*) FROM results WHERE run_id = :r"), {"r": run_id}).scalar()
-    return _jsonable({**dict(row), "results": n})
+        controls_evaluated = conn.execute(text(
+            "SELECT count(DISTINCT control_id) FROM results WHERE run_id = :r"),
+            {"r": run_id}).scalar()
+        targets_collected = conn.execute(text(
+            "SELECT count(*) FROM audit_log "
+            "WHERE run_id = :r AND event_type = 'credential_used'"),
+            {"r": run_id}).scalar()
+        total_targets = conn.execute(text(
+            "SELECT (details->>'targets')::int FROM audit_log "
+            "WHERE run_id = :r AND event_type = 'scan_started' LIMIT 1"),
+            {"r": run_id}).scalar()
+    return _jsonable({
+        **dict(row), "results": n,
+        "controls_evaluated": controls_evaluated,
+        "total_controls": len(load_controls()),
+        "targets_collected": targets_collected,
+        "total_targets": total_targets or 1,
+    })
 
 
 @app.post("/api/exceptions")

@@ -209,6 +209,23 @@ WHERE e.approved_by IS NOT NULL
 ORDER BY e.expiry_date
 """
 
+#: Deliberately separate from OPEN_EXCEPTIONS_SQL, not a widened version of it.
+#: open_exceptions() feeds the PDF compliance report (reports/generator.py), where
+#: a not-yet-reviewed request must never appear as if it were part of the accepted
+#: posture. This is only for the Exceptions page's review queue, which is called out
+#: by name in the endpoint that uses it, not folded into "exceptions" generically.
+PENDING_EXCEPTIONS_SQL = """
+SELECT e.exception_id, e.control_id, c.severity, c.title,
+       e.resource_id, e.status, e.requested_by, e.approved_by,
+       e.approval_date, e.expiry_date, e.justification, e.compensating_control,
+       (e.expiry_date <= :as_of) AS expired,
+       EXTRACT(DAY FROM (e.expiry_date - :as_of))::int AS days_until_expiry
+FROM exceptions e
+JOIN controls c ON c.id = e.control_id
+WHERE e.status = 'pending_review'
+ORDER BY e.expiry_date
+"""
+
 #: Per-finding detail for the PDF export.
 #:
 #: `evidence` is selected verbatim. The report renders the stored JSONB as-is and does
@@ -267,6 +284,15 @@ def open_exceptions(conn, as_of=None) -> list[dict]:
         dict(r)
         for r in conn.execute(
             text(OPEN_EXCEPTIONS_SQL), {"as_of": as_of or _now_utc()}
+        ).mappings()
+    ]
+
+
+def pending_exceptions(conn, as_of=None) -> list[dict]:
+    return [
+        dict(r)
+        for r in conn.execute(
+            text(PENDING_EXCEPTIONS_SQL), {"as_of": as_of or _now_utc()}
         ).mappings()
     ]
 

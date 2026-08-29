@@ -446,7 +446,55 @@ BUILD_LOG.md             what was built, what was verified, deviations from spec
 
 ---
 
-## 7. Ground rules for contributors
+## 7a. Moving to a different machine (same owner)
+
+This repo lives inside a OneDrive-synced folder (`OneDrive\Desktop\Audit Tool`), which
+is what makes this easy: `.env` and any `*.dump` database backup are both gitignored
+(never pushed to GitHub) but travel automatically via OneDrive's own sync, since
+they're just regular files inside this folder.
+
+**Before switching laptops:**
+
+1. Commit and push everything else (code, README, BUILD_LOG) — `git status` should
+   be clean.
+2. Take a database backup so real run/exception history isn't lost to a fresh, empty
+   database on the new machine:
+   ```bash
+   "C:\Program Files\PostgreSQL\17\bin\pg_dump.exe" -U audit -h localhost -d audit_tool -F c -f audit_tool_db_backup.dump
+   ```
+3. **Confirm OneDrive has actually finished syncing** this folder (no pending-upload
+   icon) before you shut down or unplug — a backup file OneDrive hasn't uploaded yet
+   doesn't exist anywhere else.
+
+**On the new laptop:**
+
+1. Install prerequisites (Section 1) and `git clone` the repo (Section 2) — or, since
+   the whole folder is OneDrive-synced, just wait for OneDrive to finish pulling it
+   down instead of cloning fresh. Either way you end up with the same `.env` and
+   `audit_tool_db_backup.dump` already present — nothing to manually copy.
+2. **Do not run `bootstrap.py create-user`** before restoring — the dump already
+   contains `aravind`/`priya` and every prior run/exception. Creating users first and
+   restoring after would leave duplicate/conflicting rows.
+3. **Reuse the existing `SECRETS_KEY` from the synced `.env` — do not regenerate
+   it.** The stored demo-VM SSH credential is Fernet-encrypted under that exact key;
+   a new key makes it permanently undecryptable (this is not a bug to debug, it's
+   how Fernet works). If the key truly cannot be recovered, the only fix is
+   `bootstrap.py store-vagrant-key` again after restore.
+4. Set up the venv and install dependencies (Section 2).
+5. Create the role and an *empty* database (Section 4b), then restore into it instead
+   of letting the app create empty tables:
+   ```bash
+   pg_restore -U audit -h localhost -d audit_tool audit_tool_db_backup.dump
+   ```
+6. `cd demo-environment && vagrant up` — this re-downloads the ~600 MB box; VM state
+   (`.vagrant/`, `*.box`) is deliberately per-machine and never travels.
+7. Start the app (Section 6) and confirm: log in with the existing `aravind` account
+   (no new bootstrap needed), check the dashboard shows the migrated history, then
+   trigger one real scan to confirm the SSH credential actually decrypted correctly.
+
+---
+
+## 7b. Ground rules for contributors
 
 - **`results` and `audit_log` are append-only.** Never write an `UPDATE` or `DELETE`
   against them anywhere. Current posture is computed as "results from the latest
